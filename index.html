@@ -1,0 +1,1328 @@
+<title>Cuadre</title>
+<style>
+  :root{
+    --bg:#EFEDE2;
+    --surface:#FBFAF5;
+    --surface-2:#E6E2D2;
+    --ink:#22271E;
+    --ink-soft:#5C6156;
+    --ink-faint:#8B8E80;
+    --accent:#2B6E58;
+    --accent-ink:#F4FBF7;
+    --accent-soft:#DCEAE3;
+    --line:#DAD5C2;
+    --warn:#B5762B;
+    --warn-soft:#F3E4CC;
+    --danger:#AE3F3F;
+    --danger-soft:#F2DCDC;
+    --good:#2B6E58;
+    --shadow:0 1px 2px rgba(30,26,10,.06), 0 8px 24px rgba(30,26,10,.08);
+
+    --cat-1:#2B6E58; --cat-2:#B5762B; --cat-3:#A5533F; --cat-4:#4C6C93;
+    --cat-5:#7C5A8C; --cat-6:#7A7C3D; --cat-7:#8C6239; --cat-8:#5C7A7A;
+
+    --font-display: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#12160F;
+      --surface:#1B2117;
+      --surface-2:#242B1D;
+      --ink:#EEEBE0;
+      --ink-soft:#AAAE9C;
+      --ink-faint:#767A6A;
+      --accent:#5FBE9C;
+      --accent-ink:#0E1A15;
+      --accent-soft:#203129;
+      --line:#333A29;
+      --warn:#E0A455;
+      --warn-soft:#332A18;
+      --danger:#E07272;
+      --danger-soft:#332020;
+      --good:#5FBE9C;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+      --cat-1:#5FBE9C; --cat-2:#E0A455; --cat-3:#D98567; --cat-4:#8AA9D6;
+      --cat-5:#B98FCB; --cat-6:#B9BC6E; --cat-7:#C79A69; --cat-8:#9AC0C0;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#12160F;
+    --surface:#1B2117;
+    --surface-2:#242B1D;
+    --ink:#EEEBE0;
+    --ink-soft:#AAAE9C;
+    --ink-faint:#767A6A;
+    --accent:#5FBE9C;
+    --accent-ink:#0E1A15;
+    --accent-soft:#203129;
+    --line:#333A29;
+    --warn:#E0A455;
+    --warn-soft:#332A18;
+    --danger:#E07272;
+    --danger-soft:#332020;
+    --good:#5FBE9C;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    --cat-1:#5FBE9C; --cat-2:#E0A455; --cat-3:#D98567; --cat-4:#8AA9D6;
+    --cat-5:#B98FCB; --cat-6:#B9BC6E; --cat-7:#C79A69; --cat-8:#9AC0C0;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:16px;
+    line-height:1.45;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit;}
+  input,select,textarea{font-family:inherit;font-size:16px;}
+  button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px;
+  }
+  h1,h2,h3{font-family:var(--font-display); font-weight:600; margin:0; text-wrap:balance;}
+  .tnum{font-variant-numeric:tabular-nums;}
+
+  .shell{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100vh;
+    background:var(--surface);
+    display:flex;
+    flex-direction:column;
+    position:relative;
+  }
+  @media (min-width:560px){
+    body{padding:28px 16px;}
+    .shell{
+      min-height:calc(100vh - 56px);
+      border-radius:22px;
+      box-shadow:var(--shadow);
+      border:1px solid var(--line);
+      overflow:hidden;
+    }
+  }
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:12px; padding:16px 18px 12px;
+    border-bottom:1px solid var(--line);
+    background:var(--surface);
+    position:sticky; top:0; z-index:5;
+  }
+  .brand{display:flex; align-items:center; gap:8px; font-family:var(--font-display); font-size:1.15rem; font-weight:600;}
+  .brand .mark{font-size:1.25rem;}
+  .profile-pill{
+    display:flex; align-items:center; gap:6px;
+    background:var(--surface-2); color:var(--ink);
+    border:1px solid var(--line); border-radius:999px;
+    padding:7px 12px 7px 14px; font-size:.85rem; font-weight:600;
+    cursor:pointer; max-width:52%;
+  }
+  .profile-pill span.name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .profile-pill .caret{color:var(--ink-faint); font-size:.7rem;}
+
+  .view{flex:1; padding:16px 18px 100px; overflow-y:auto;}
+
+  .tabbar{
+    position:sticky; bottom:0; z-index:5;
+    display:grid; grid-template-columns:repeat(4,1fr);
+    background:var(--surface);
+    border-top:1px solid var(--line);
+    padding:6px 6px calc(6px + env(safe-area-inset-bottom)) 6px;
+  }
+  .tabbar button{
+    background:none; border:none; color:var(--ink-faint);
+    font-size:.72rem; font-weight:600; letter-spacing:.02em;
+    padding:8px 4px 6px; border-radius:12px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+  }
+  .tabbar button .dot{width:6px;height:6px;border-radius:50%;background:transparent;}
+  .tabbar button.active{color:var(--accent);}
+  .tabbar button.active .dot{background:var(--accent);}
+
+  .card{
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:16px;
+  }
+  .stack{display:flex; flex-direction:column; gap:14px;}
+  .row{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+
+  .eyebrow{
+    font-size:.7rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  .headline{
+    font-family:var(--font-display); font-size:2.1rem; font-weight:600; line-height:1.1;
+  }
+  .sub{color:var(--ink-soft); font-size:.85rem;}
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    background:var(--accent); color:var(--accent-ink);
+    border:none; border-radius:12px; padding:11px 16px;
+    font-weight:700; font-size:.9rem; cursor:pointer;
+  }
+  .btn.secondary{background:var(--surface); color:var(--ink); border:1px solid var(--line);}
+  .btn.block{width:100%;}
+  .btn.small{padding:7px 12px; font-size:.8rem; border-radius:10px;}
+  .btn.ghost{background:none; border:1px dashed var(--line); color:var(--ink-soft);}
+  .icon-btn{
+    background:none; border:none; color:var(--ink-faint); cursor:pointer;
+    font-size:1rem; padding:4px 6px; border-radius:8px; line-height:1;
+  }
+  .icon-btn:hover{color:var(--danger);}
+
+  label.field{display:flex; flex-direction:column; gap:6px; font-size:.8rem; color:var(--ink-soft); font-weight:600;}
+  label.field input, label.field select, label.field textarea{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:10px 12px; color:var(--ink); font-size:1rem;
+  }
+  label.field textarea{resize:vertical; min-height:60px;}
+
+  .section-title{
+    font-family:var(--font-display); font-size:1.05rem; font-weight:600;
+    margin:22px 0 10px;
+  }
+  .section-title:first-child{margin-top:0;}
+
+  .catrow{
+    display:grid; grid-template-columns:10px 1fr 62px 84px 28px;
+    align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);
+  }
+  .catrow:last-child{border-bottom:none;}
+  .catdot{width:10px;height:10px;border-radius:50%;}
+  .catrow input.cat-name{
+    background:none; border:none; border-bottom:1px solid transparent; color:var(--ink);
+    font-weight:600; padding:2px 0; width:100%;
+  }
+  .catrow input.cat-name:focus{border-bottom-color:var(--accent);}
+  .catrow input.cat-percent{
+    background:var(--surface); border:1px solid var(--line); border-radius:8px;
+    padding:6px 4px; text-align:center; width:100%;
+    color:var(--ink); font-weight:700; font-family:var(--font-mono);
+  }
+  .catrow .catamt{font-family:var(--font-mono); font-size:.85rem; text-align:right;}
+
+  .allocbar{height:10px; border-radius:999px; overflow:hidden; display:flex; background:var(--line);}
+  .allocbar span{height:100%;}
+  .pcttotal{display:flex; align-items:center; justify-content:space-between; font-size:.8rem; font-weight:700; margin-top:8px;}
+  .pcttotal.ok{color:var(--good);}
+  .pcttotal.warn{color:var(--warn);}
+
+  .progress{height:8px; border-radius:999px; background:var(--line); overflow:hidden;}
+  .progress > span{display:block; height:100%; border-radius:999px;}
+
+  .catcard{padding:12px 0; border-bottom:1px solid var(--line);}
+  .catcard:last-child{border-bottom:none;}
+  .catcard .row{margin-bottom:6px;}
+  .catcard .amounts{font-family:var(--font-mono); font-size:.78rem; color:var(--ink-soft);}
+
+  .expday{margin-bottom:18px;}
+  .expday-label{font-size:.75rem; font-weight:700; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;}
+  .exprow{
+    display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);
+  }
+  .exprow:last-child{border-bottom:none;}
+  .exprow .catdot{flex-shrink:0;}
+  .exprow .meta{flex:1; min-width:0;}
+  .exprow .cname{font-weight:600; font-size:.9rem;}
+  .exprow .note{color:var(--ink-soft); font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .exprow .amt{font-family:var(--font-mono); font-weight:600; white-space:nowrap;}
+
+  .monthnav{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .monthnav button{background:var(--surface-2); border:1px solid var(--line); color:var(--ink); border-radius:8px; width:32px; height:32px; cursor:pointer;}
+  .monthnav .label{font-weight:700; text-transform:capitalize; font-family:var(--font-display); font-size:1.05rem;}
+
+  .empty{text-align:center; padding:30px 10px; color:var(--ink-faint); font-size:.85rem;}
+
+  .fab-row{display:flex; gap:10px; margin-top:16px;}
+
+  .overlay{
+    position:fixed; inset:0; background:rgba(10,10,6,.45);
+    display:flex; align-items:flex-end; justify-content:center;
+    opacity:0; pointer-events:none; transition:opacity .15s ease; z-index:20;
+  }
+  @media (min-width:560px){ .overlay{align-items:center;} }
+  .overlay.open{opacity:1; pointer-events:auto;}
+  .sheet{
+    background:var(--surface); border-radius:18px 18px 0 0;
+    width:100%; max-width:480px; max-height:88vh; overflow-y:auto;
+    padding:18px 18px calc(20px + env(safe-area-inset-bottom));
+    box-shadow:var(--shadow);
+  }
+  @media (min-width:560px){ .sheet{border-radius:18px; max-height:80vh;} }
+  .sheet-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .sheet-head h3{font-size:1.1rem;}
+  .sheet form{display:flex; flex-direction:column; gap:12px;}
+
+  .profitem{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 12px; border-radius:10px; border:1px solid var(--line);
+    margin-bottom:8px; cursor:pointer; background:var(--surface);
+  }
+  .profitem.active{border-color:var(--accent); background:var(--accent-soft);}
+  .profitem .pname{font-weight:600;}
+
+  .chartwrap{margin-top:6px;}
+  .chartwrap svg{width:100%; height:auto; display:block;}
+
+  .pill{display:inline-block; padding:2px 9px; border-radius:999px; font-size:.7rem; font-weight:700;}
+  .pill.good{background:var(--accent-soft); color:var(--good);}
+  .pill.warn{background:var(--warn-soft); color:var(--warn);}
+  .pill.danger{background:var(--danger-soft); color:var(--danger);}
+
+  .note-line{font-size:.75rem; color:var(--ink-faint); margin-top:4px;}
+
+  .linkbtn{
+    background:none; border:none; padding:0; margin-top:8px;
+    color:var(--ink-soft); font-size:.75rem; font-weight:600;
+    text-decoration:underline; text-underline-offset:2px; cursor:pointer;
+    text-align:left;
+  }
+  .linkbtn:hover{color:var(--accent);}
+
+  .btn.danger{background:var(--danger); color:#fff;}
+
+  .warncard{
+    background:var(--warn-soft); border:1px solid var(--warn);
+    border-radius:14px; padding:14px 16px; color:var(--ink);
+  }
+  .warncard-title{font-weight:700; font-size:.9rem; color:var(--warn); margin-bottom:4px;}
+  .warncard p{margin:0; font-size:.8rem; line-height:1.45; color:var(--ink-soft);}
+
+  .toast{
+    position:fixed; left:50%; bottom:calc(104px + env(safe-area-inset-bottom));
+    transform:translate(-50%, 12px);
+    background:var(--ink); color:var(--surface);
+    padding:11px 16px; border-radius:12px;
+    font-size:.83rem; font-weight:600; line-height:1.3;
+    max-width:min(400px, calc(100vw - 36px));
+    box-shadow:var(--shadow);
+    opacity:0; pointer-events:none; z-index:40;
+    transition:opacity .18s ease, transform .18s ease;
+  }
+  .toast.show{opacity:1; transform:translate(-50%, 0);}
+  @media (prefers-reduced-motion: reduce){
+    .toast{transition:none;}
+  }
+
+  .onboard{display:flex; flex-direction:column; justify-content:center; min-height:100vh; padding:32px 28px; gap:18px;}
+  .onboard .mark{font-size:2.4rem;}
+</style>
+
+<div class="shell" id="shell"></div>
+<div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  "use strict";
+  var LS_KEY = "cuadre_v1";
+  var CAT_COLORS = 8;
+
+  function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+  function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+  function todayStr(){
+    var d = new Date();
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  }
+  function ymKey(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+  function ymAdd(ym, delta){
+    var parts = ym.split("-"); var y = Number(parts[0]); var m = Number(parts[1]) - 1;
+    var d = new Date(y, m + delta, 1);
+    return ymKey(d);
+  }
+  function monthLabel(ym){
+    var parts = ym.split("-"); var d = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+    var s = new Intl.DateTimeFormat("es", {month:"long", year:"numeric"}).format(d);
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  function dayLabel(dateStr){
+    var parts = dateStr.split("-"); var d = new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+    var s = new Intl.DateTimeFormat("es", {weekday:"short", day:"numeric", month:"short"}).format(d);
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  function dateShort(dateStr){
+    var parts = dateStr.split("-"); var d = new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+    return new Intl.DateTimeFormat("es", {day:"numeric", month:"short"}).format(d);
+  }
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  // ---------- almacenamiento ----------
+  // Algunos visores (incluido el de Claude) bloquean o vacían el almacenamiento
+  // del navegador. Si eso pasa, la app sigue funcionando en memoria durante la
+  // sesión y avisa que hay que exportar el respaldo antes de cerrar.
+  var storageOk = (function(){
+    try{
+      localStorage.setItem(LS_KEY + "__test", "1");
+      localStorage.removeItem(LS_KEY + "__test");
+      return true;
+    }catch(e){ return false; }
+  })();
+
+  function loadDB(){
+    if(!storageOk) return {profiles:{}, active:null};
+    try{
+      var raw = localStorage.getItem(LS_KEY);
+      if(!raw) return {profiles:{}, active:null};
+      var parsed = JSON.parse(raw);
+      if(!parsed || typeof parsed !== "object") return {profiles:{}, active:null};
+      if(!parsed.profiles) parsed.profiles = {};
+      return parsed;
+    }catch(e){ return {profiles:{}, active:null}; }
+  }
+  var DB = loadDB();
+
+  function saveDB(){
+    if(!storageOk) return false;
+    try{
+      localStorage.setItem(LS_KEY, JSON.stringify(DB));
+      return true;
+    }catch(e){
+      // El almacenamiento dejó de aceptar escrituras (cuota llena o bloqueado).
+      storageOk = false;
+      showToast("No se pudieron guardar los cambios en este navegador. Exporta tu respaldo antes de cerrar.");
+      return false;
+    }
+  }
+
+  function seedCategories(){
+    return [
+      {id:uid(), name:"Vivienda", percent:30, colorIdx:0},
+      {id:uid(), name:"Comida", percent:20, colorIdx:1},
+      {id:uid(), name:"Transporte", percent:10, colorIdx:2},
+      {id:uid(), name:"Ocio", percent:10, colorIdx:3},
+      {id:uid(), name:"Ahorro", percent:15, colorIdx:4},
+      {id:uid(), name:"Otros", percent:15, colorIdx:5}
+    ];
+  }
+
+  function createProfile(name){
+    var id = uid();
+    DB.profiles[id] = {
+      id: id, name: name, currency: "$",
+      budget: 0,
+      catColorSeq: 6,
+      categories: seedCategories(),
+      expenses: [], savings: [], interest: [],
+      createdAt: Date.now()
+    };
+    DB.active = id;
+    saveDB();
+    return id;
+  }
+  function activeProfile(){ return DB.profiles[DB.active]; }
+
+  function fmt(p, n){
+    var v = Number(n) || 0;
+    var neg = v < 0;
+    v = Math.round(Math.abs(v));
+    var s = v.toLocaleString("es-CO");
+    return (neg ? "-" : "") + (p ? p.currency : "$") + s;
+  }
+
+  function catColor(idx){ return "var(--cat-" + ((idx % CAT_COLORS) + 1) + ")"; }
+  function getCategory(p, id){
+    for(var i=0;i<p.categories.length;i++){ if(p.categories[i].id === id) return p.categories[i]; }
+    return null;
+  }
+
+  // ---------- state ----------
+  var currentTab = "resumen";
+  var uiMonth = ymKey(new Date());
+
+  // ---------- generic sheet ----------
+  var overlay = document.getElementById("overlay");
+  var sheetEl = document.getElementById("sheet");
+  function openSheet(html){
+    sheetEl.innerHTML = html;
+    overlay.classList.add("open");
+    var first = sheetEl.querySelector("input,select,textarea");
+    if(first) setTimeout(function(){ first.focus(); }, 60);
+  }
+  function closeSheet(){ overlay.classList.remove("open"); sheetEl.innerHTML = ""; }
+  overlay.addEventListener("click", function(e){ if(e.target === overlay) closeSheet(); });
+  document.addEventListener("keydown", function(e){ if(e.key === "Escape") closeSheet(); });
+
+  // Avisos propios: el visor de Claude bloquea alert() y confirm() del navegador.
+  var toastEl = document.getElementById("toast");
+  var toastTimer = null;
+  function showToast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove("show"); }, 3600);
+  }
+
+  function showMessageSheet(title, body){
+    openSheet(
+      '<div class="sheet-head"><h3>' + esc(title) + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">' + esc(body) + '</p>' +
+      '<button class="btn block" id="msgOk" style="margin-top:14px;">Entendido</button>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("msgOk").addEventListener("click", closeSheet);
+  }
+
+  function askConfirm(opts){
+    openSheet(
+      '<div class="sheet-head"><h3>' + esc(opts.title) + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">' + esc(opts.body) + '</p>' +
+      '<div class="stack" style="margin-top:14px;">' +
+        '<button class="btn block' + (opts.danger ? ' danger' : '') + '" id="confirmYes">' + esc(opts.confirmLabel || "Confirmar") + '</button>' +
+        '<button class="btn secondary block" id="confirmNo">Cancelar</button>' +
+      '</div>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("confirmNo").addEventListener("click", closeSheet);
+    document.getElementById("confirmYes").addEventListener("click", function(){
+      closeSheet();
+      opts.onConfirm();
+    });
+  }
+
+  // ---------- render root ----------
+  var shell = document.getElementById("shell");
+
+  function renderApp(){
+    if(!DB.active || !DB.profiles[DB.active]){
+      renderOnboarding();
+      return;
+    }
+    var p = activeProfile();
+    shell.innerHTML =
+      '<header class="topbar">' +
+        '<div class="brand"><span class="mark">🧮</span><span>Cuadre</span></div>' +
+        '<button class="profile-pill" id="profileBtn"><span class="name">' + esc(p.name) + '</span><span class="caret">▾</span></button>' +
+      '</header>' +
+      '<main class="view" id="view"></main>' +
+      '<nav class="tabbar" id="tabbar">' +
+        tabBtn("resumen","Resumen") + tabBtn("presupuesto","Presupuesto") + tabBtn("gastos","Gastos") + tabBtn("ahorros","Ahorros") +
+      '</nav>';
+    document.getElementById("profileBtn").addEventListener("click", openProfileSheet);
+    document.getElementById("tabbar").addEventListener("click", function(e){
+      var btn = e.target.closest("button[data-tab]");
+      if(!btn) return;
+      currentTab = btn.dataset.tab;
+      renderView();
+    });
+    renderView();
+  }
+
+  function tabBtn(id,label){
+    return '<button data-tab="' + id + '" class="' + (currentTab===id?"active":"") + '"><span class="dot"></span>' + label + '</button>';
+  }
+
+  function renderView(){
+    var tabbar = document.getElementById("tabbar");
+    if(tabbar){
+      Array.prototype.forEach.call(tabbar.querySelectorAll("button"), function(b){
+        b.classList.toggle("active", b.dataset.tab === currentTab);
+      });
+    }
+    var view = document.getElementById("view");
+    var p = activeProfile();
+    if(!p) return;
+    if(currentTab === "resumen") view.innerHTML = viewResumen(p);
+    else if(currentTab === "presupuesto") view.innerHTML = viewPresupuesto(p);
+    else if(currentTab === "gastos") view.innerHTML = viewGastos(p);
+    else if(currentTab === "ahorros") view.innerHTML = viewAhorros(p);
+    bindViewEvents();
+  }
+
+  // ---------- Onboarding ----------
+  function renderOnboarding(){
+    var hasProfiles = Object.keys(DB.profiles).length > 0;
+    shell.innerHTML =
+      '<div class="onboard">' +
+        '<div class="mark">🧮</div>' +
+        '<h1>Bienvenido a Cuadre</h1>' +
+        '<p class="sub">Tu presupuesto mensual, tus gastos diarios y tus ahorros, en un solo lugar. Cada persona que use este dispositivo puede crear su propio perfil — tus datos se guardan solo aquí, en este navegador.</p>' +
+        storageWarning() +
+        '<form id="onboardForm" class="stack">' +
+          '<label class="field">¿Cómo te llamas?<input type="text" id="onboardName" placeholder="Tu nombre" maxlength="24" required autocomplete="off"></label>' +
+          '<button class="btn block" type="submit">Crear mi perfil</button>' +
+        '</form>' +
+        (hasProfiles ? '<button class="btn secondary block" id="pickExisting">Usar un perfil existente</button>' : '') +
+        '<div>' +
+          '<p class="sub" style="margin:0 0 8px;">¿Ya tienes un respaldo de Cuadre? Recupéralo y sigue donde ibas.</p>' +
+          '<div class="fab-row" style="margin-top:0;">' +
+            '<button class="btn secondary block" id="onboardImportBtn">Importar archivo</button>' +
+            '<button class="btn secondary block" id="onboardPasteBtn">Pegar respaldo</button>' +
+          '</div>' +
+          '<input type="file" id="onboardImportFile" style="display:none;">' +
+        '</div>' +
+      '</div>';
+    document.getElementById("onboardForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var name = document.getElementById("onboardName").value.trim();
+      if(!name) return;
+      createProfile(name);
+      renderApp();
+    });
+    var pick = document.getElementById("pickExisting");
+    if(pick) pick.addEventListener("click", function(){
+      DB.active = Object.keys(DB.profiles)[0];
+      saveDB();
+      renderApp();
+    });
+    document.getElementById("onboardImportBtn").addEventListener("click", function(){
+      document.getElementById("onboardImportFile").click();
+    });
+    document.getElementById("onboardPasteBtn").addEventListener("click", openPasteImport);
+    document.getElementById("onboardImportFile").addEventListener("change", function(e){
+      var file = e.target.files && e.target.files[0];
+      if(file) handleImportFile(file);
+      e.target.value = "";
+    });
+  }
+
+  // ---------- Profile sheet ----------
+  function openProfileSheet(){
+    var p = activeProfile();
+    var items = Object.keys(DB.profiles).map(function(id){
+      var pr = DB.profiles[id];
+      return '<div class="profitem ' + (id===DB.active?"active":"") + '" data-pick="' + id + '">' +
+        '<span class="pname">' + esc(pr.name) + '</span>' +
+        (id===DB.active ? '<span class="pill good">Activo</span>' : '<button class="icon-btn" data-delprof="' + id + '" title="Eliminar">✕</button>') +
+      '</div>';
+    }).join("");
+    openSheet(
+      '<div class="sheet-head"><h3>Perfiles</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<div id="profList">' + items + '</div>' +
+      '<form id="newProfForm" class="row" style="margin-top:10px; gap:8px;">' +
+        '<input type="text" id="newProfName" placeholder="Nombre del nuevo perfil" maxlength="24" style="flex:1; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:var(--ink);" required>' +
+        '<button class="btn small" type="submit">Crear</button>' +
+      '</form>' +
+      '<div class="section-title">Ajustes de "' + esc(p.name) + '"</div>' +
+      '<form id="profSettingsForm" class="stack">' +
+        '<label class="field">Nombre<input type="text" id="setName" value="' + esc(p.name) + '" maxlength="24"></label>' +
+        '<label class="field">Símbolo de moneda<input type="text" id="setCurrency" value="' + esc(p.currency) + '" maxlength="4"></label>' +
+        '<button class="btn secondary block" type="submit">Guardar cambios</button>' +
+      '</form>' +
+      '<p class="note-line">Cada perfil guarda su propio presupuesto, gastos y ahorros. Los datos viven solo en este navegador: si abres Cuadre en otro celular o navegador, empezará vacío ahí. Puedes respaldarlos desde Resumen → Respaldo de datos.</p>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("profList").addEventListener("click", function(e){
+      var pick = e.target.closest("[data-pick]");
+      var del = e.target.closest("[data-delprof]");
+      if(del){
+        e.stopPropagation();
+        var id = del.dataset.delprof;
+        var nm = DB.profiles[id] ? DB.profiles[id].name : "";
+        askConfirm({
+          title: 'Eliminar "' + nm + '"',
+          body: 'Se borrarán su presupuesto, sus gastos y sus ahorros en este dispositivo. Esta acción no se puede deshacer.',
+          confirmLabel: "Eliminar perfil",
+          danger: true,
+          onConfirm: function(){
+            delete DB.profiles[id];
+            saveDB();
+            openProfileSheet();
+            showToast('Perfil "' + nm + '" eliminado.');
+          }
+        });
+        return;
+      }
+      if(pick){
+        DB.active = pick.dataset.pick;
+        saveDB();
+        closeSheet();
+        renderApp();
+      }
+    });
+    document.getElementById("newProfForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var name = document.getElementById("newProfName").value.trim();
+      if(!name) return;
+      createProfile(name);
+      closeSheet();
+      renderApp();
+    });
+    document.getElementById("profSettingsForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var name = document.getElementById("setName").value.trim();
+      var cur = document.getElementById("setCurrency").value.trim();
+      if(name) p.currency = cur || "$", p.name = name;
+      saveDB();
+      closeSheet();
+      renderApp();
+    });
+  }
+
+  // ---------- export / import ----------
+  // Dentro del visor de Claude el navegador bloquea las descargas que inicia la
+  // propia página, así que ahí mostramos el respaldo como texto copiable.
+  function inClaudeViewer(){
+    try{ return typeof claude !== "undefined" && claude !== null; }
+    catch(e){ return false; }
+  }
+
+  function showExportFallback(json, filename){
+    openSheet(
+      '<div class="sheet-head"><h3>Copia tu respaldo</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">Copia este texto y guárdalo en un archivo llamado ' + esc(filename) + '. Sirve igual que el archivo descargado: puedes importarlo después desde cualquier dispositivo.</p>' +
+      '<textarea id="exportText" readonly style="width:100%; min-height:220px; font-family:var(--font-mono); font-size:.7rem; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px; color:var(--ink);">' + esc(json) + '</textarea>' +
+      '<button class="btn block" id="copyExportBtn" style="margin-top:10px;">Copiar al portapapeles</button>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    var ta = document.getElementById("exportText");
+    document.getElementById("copyExportBtn").addEventListener("click", function(){
+      ta.focus(); ta.select();
+      var btn = document.getElementById("copyExportBtn");
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(json).then(function(){ btn.textContent = "¡Copiado!"; })
+          .catch(function(){ btn.textContent = "Selecciona y copia manualmente"; });
+      }
+    });
+  }
+
+  function browserDownload(json, filename){
+    try{
+      var blob = new Blob([json], {type:"application/json"});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      return true;
+    }catch(e){ return false; }
+  }
+
+  function buildBackupJson(){
+    return JSON.stringify({ app: "cuadre", version: 1, exportedAt: new Date().toISOString(), active: DB.active, profiles: DB.profiles }, null, 2);
+  }
+  function backupFilename(){ return "cuadre-respaldo-" + todayStr() + ".json"; }
+
+  function exportAllData(){
+    var json = buildBackupJson();
+    var filename = backupFilename();
+    if(inClaudeViewer() || !browserDownload(json, filename)){
+      showExportFallback(json, filename);
+    }
+  }
+
+  function showBackupAsText(){
+    showExportFallback(buildBackupJson(), backupFilename());
+  }
+
+  // Devuelve {ok:true, profiles:{}} o {ok:false, error:"..."}
+  function parseBackup(text){
+    var data;
+    try{ data = JSON.parse(text); }
+    catch(e){ return {ok:false, error:"El contenido no es un respaldo válido. Asegúrate de pegar o elegir el archivo .json completo que generó Cuadre al exportar."}; }
+    if(!data || typeof data !== "object" || !data.profiles || typeof data.profiles !== "object"){
+      return {ok:false, error:"Esto no parece un respaldo de Cuadre. Debe ser el archivo .json que genera el botón Exportar."};
+    }
+    var clean = {};
+    var count = 0;
+    Object.keys(data.profiles).forEach(function(id){
+      var pr = data.profiles[id];
+      if(!pr || typeof pr !== "object" || !pr.name) return;
+      clean[id] = {
+        id: id,
+        name: String(pr.name),
+        currency: pr.currency || "$",
+        budget: Number(pr.budget) || 0,
+        catColorSeq: Number(pr.catColorSeq) || 0,
+        categories: Array.isArray(pr.categories) ? pr.categories : [],
+        expenses: Array.isArray(pr.expenses) ? pr.expenses : [],
+        savings: Array.isArray(pr.savings) ? pr.savings : [],
+        interest: Array.isArray(pr.interest) ? pr.interest : [],
+        createdAt: pr.createdAt || Date.now()
+      };
+      count++;
+    });
+    if(!count) return {ok:false, error:"El respaldo no contiene ningún perfil."};
+    return {ok:true, profiles: clean, active: (data.active && clean[data.active]) ? data.active : null};
+  }
+
+  function applyImport(profiles, replaceExisting, preferredActive){
+    var added = [], replaced = [], kept = [];
+    Object.keys(profiles).forEach(function(id){
+      var incoming = profiles[id];
+      if(DB.profiles[id]){
+        if(replaceExisting){ DB.profiles[id] = incoming; replaced.push(incoming.name); }
+        else { kept.push(incoming.name); }
+      } else {
+        DB.profiles[id] = incoming;
+        added.push(incoming.name);
+      }
+    });
+
+    // Dejar activo el perfil que viene del respaldo, para ver de una vez su
+    // presupuesto, sus gastos y sus ahorros.
+    var target = (preferredActive && DB.profiles[preferredActive]) ? preferredActive : null;
+    if(!target){
+      var ids = Object.keys(profiles).filter(function(id){ return !!DB.profiles[id]; });
+      target = ids.length ? ids[0] : null;
+    }
+    if(target) DB.active = target;
+    if(!DB.active || !DB.profiles[DB.active]) DB.active = Object.keys(DB.profiles)[0];
+
+    var guardado = saveDB();
+    closeSheet();
+    currentTab = "resumen";
+    renderApp();
+
+    var parts = [];
+    if(added.length) parts.push(added.length + (added.length===1 ? " perfil agregado" : " perfiles agregados"));
+    if(replaced.length) parts.push(replaced.length + (replaced.length===1 ? " actualizado" : " actualizados"));
+    if(kept.length) parts.push(kept.length + " sin cambios");
+    var resumen = parts.length ? "Listo: " + parts.join(", ") + "." : "No se importó nada.";
+    showToast(guardado ? resumen : resumen + " Ojo: este navegador no está guardando los datos.");
+  }
+
+  function openImportPreview(profiles, preferredActive){
+    var ids = Object.keys(profiles);
+    var dupes = ids.filter(function(id){ return !!DB.profiles[id]; });
+    var rows = ids.map(function(id){
+      var isDupe = !!DB.profiles[id];
+      var pr = profiles[id];
+      var nAhorro = pr.savings.length + pr.interest.length;
+      var counts = pr.expenses.length + (pr.expenses.length===1 ? " gasto" : " gastos") + " · " +
+                   nAhorro + (nAhorro===1 ? " registro de ahorro" : " registros de ahorro");
+      return '<div class="exprow">' +
+        '<span class="pill ' + (isDupe ? "warn" : "good") + '" style="min-width:60px; text-align:center;">' + (isDupe ? "Ya existe" : "Nuevo") + '</span>' +
+        '<div class="meta"><div class="cname">' + esc(pr.name) + '</div><div class="note">' + counts + '</div></div>' +
+      '</div>';
+    }).join("");
+
+    openSheet(
+      '<div class="sheet-head"><h3>Revisa antes de importar</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<div class="card">' + rows + '</div>' +
+      (dupes.length
+        ? '<p class="note-line" style="margin-top:10px;">' + dupes.length + (dupes.length===1 ? ' perfil ya existe' : ' perfiles ya existen') + ' en este dispositivo. Elige qué hacer con ' + (dupes.length===1 ? 'ese' : 'esos') + ':</p>' +
+          '<div class="stack" style="margin-top:10px;">' +
+            '<button class="btn block" id="impReplace">Reemplazar con los del respaldo</button>' +
+            '<button class="btn secondary block" id="impKeep">Conservar los de este dispositivo</button>' +
+          '</div>'
+        : '<div class="stack" style="margin-top:12px;">' +
+            '<button class="btn block" id="impReplace">Importar</button>' +
+          '</div>') +
+      '<p class="note-line">Importar nunca borra perfiles: solo agrega los nuevos, y reemplaza los repetidos si tú lo eliges.</p>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("impReplace").addEventListener("click", function(){ applyImport(profiles, true, preferredActive); });
+    var keep = document.getElementById("impKeep");
+    if(keep) keep.addEventListener("click", function(){ applyImport(profiles, false, preferredActive); });
+  }
+
+  function startImport(text){
+    var res = parseBackup(text);
+    if(!res.ok){ showMessageSheet("No se pudo importar", res.error); return; }
+    openImportPreview(res.profiles, res.active);
+  }
+
+  function handleImportFile(file){
+    var reader = new FileReader();
+    reader.onload = function(){ startImport(String(reader.result)); };
+    reader.onerror = function(){
+      showMessageSheet("No se pudo leer el archivo", "Intenta de nuevo, o usa la opción de pegar el respaldo como texto.");
+    };
+    reader.readAsText(file);
+  }
+
+  function openPasteImport(){
+    openSheet(
+      '<div class="sheet-head"><h3>Pegar respaldo</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">Pega aquí el texto del respaldo (el contenido del archivo .json) y toca Importar.</p>' +
+      '<textarea id="pasteArea" placeholder="Pega aquí el respaldo…" style="width:100%; min-height:200px; font-family:var(--font-mono); font-size:.7rem; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px; color:var(--ink);"></textarea>' +
+      '<button class="btn block" id="pasteImportBtn" style="margin-top:10px;">Importar</button>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("pasteImportBtn").addEventListener("click", function(){
+      var text = document.getElementById("pasteArea").value.trim();
+      if(!text){ showMessageSheet("Nada que importar", "Primero pega el texto del respaldo en el recuadro."); return; }
+      startImport(text);
+    });
+  }
+
+  // ---------- computations ----------
+  function monthExpenses(p, ym){
+    return p.expenses.filter(function(e){ return e.date.slice(0,7) === ym; });
+  }
+  function monthSpentByCategory(p, ym){
+    var map = {};
+    monthExpenses(p, ym).forEach(function(e){
+      map[e.categoryId] = (map[e.categoryId] || 0) + Number(e.amount);
+    });
+    return map;
+  }
+  function monthTotalSpent(p, ym){
+    return monthExpenses(p, ym).reduce(function(s,e){ return s + Number(e.amount); }, 0);
+  }
+  function pctSum(p){
+    return p.categories.reduce(function(s,c){ return s + (Number(c.percent)||0); }, 0);
+  }
+
+  // ---------- Resumen ----------
+  function storageWarning(){
+    if(storageOk) return "";
+    return '<div class="warncard">' +
+      '<div class="warncard-title">Este navegador no está guardando tus datos</div>' +
+      '<p>Puedes usar Cuadre normalmente, pero al cerrar o recargar la página se perderá lo que registres. ' +
+      'Antes de salir, usa <b>Exportar</b> aquí abajo y guarda tu respaldo; al volver, impórtalo para seguir donde ibas.</p>' +
+    '</div>';
+  }
+
+  function backupSection(){
+    return '<div>' +
+      '<div class="section-title">Respaldo de datos</div>' +
+      '<div class="card">' +
+        '<div class="fab-row" style="margin-top:0;">' +
+          '<button class="btn secondary block" data-action="export">Exportar</button>' +
+          '<button class="btn secondary block" data-action="import">Importar</button>' +
+        '</div>' +
+        '<input type="file" id="importFile" style="display:none;">' +
+        '<p class="note-line">Exportar guarda un archivo con todos tus perfiles y sus registros: consérvalo como respaldo o pásalo a otro celular. Al importar, esos perfiles se suman a los que ya tienes aquí; si alguno coincide, te preguntamos antes de reemplazarlo.</p>' +
+        '<div style="display:flex; flex-direction:column; align-items:flex-start;">' +
+          '<button class="linkbtn" data-action="export-text">Ver el respaldo como texto para copiarlo</button>' +
+          '<button class="linkbtn" data-action="import-text">Pegar un respaldo en texto</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function viewResumen(p){
+    var thisMonth = ymKey(new Date());
+    var spent = monthTotalSpent(p, thisMonth);
+    var remaining = p.budget - spent;
+    var spentByCat = monthSpentByCategory(p, thisMonth);
+    var overallPct = p.budget > 0 ? clamp((spent / p.budget) * 100, 0, 999) : 0;
+    var overallState = overallPct >= 100 ? "danger" : overallPct >= 85 ? "warn" : "good";
+
+    if(!p.budget){
+      return '<div class="stack">' +
+        storageWarning() +
+        '<div class="card" style="text-align:center; padding:28px 18px;">' +
+          '<div class="eyebrow">Primer paso</div>' +
+          '<h2 style="margin:10px 0 6px;">Configura tu presupuesto</h2>' +
+          '<p class="sub">Define cuánto ingresas al mes y cómo se reparte entre tus categorías de gasto.</p>' +
+          '<button class="btn block" style="margin-top:14px;" data-goto="presupuesto">Ir a Presupuesto</button>' +
+        '</div>' +
+        backupSection() +
+      '</div>';
+    }
+
+    var catCards = p.categories.map(function(c, idx){
+      var sp = spentByCat[c.id] || 0;
+      var alloc = p.budget * (c.percent/100);
+      var pct = alloc > 0 ? clamp((sp/alloc)*100, 0, 100) : (sp>0?100:0);
+      var state = alloc > 0 && sp > alloc ? "danger" : pct >= 85 ? "warn" : "good";
+      return '<div class="catcard">' +
+        '<div class="row"><div class="row" style="gap:8px;"><span class="catdot" style="background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span><span style="font-weight:600;">' + esc(c.name) + '</span></div>' +
+        '<span class="pill ' + state + '">' + Math.round(pct) + '%</span></div>' +
+        '<div class="progress"><span style="width:' + pct + '%; background:' + (state==="danger"?"var(--danger)":state==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
+        '<div class="amounts row" style="margin-top:6px;"><span>' + fmt(p,sp) + ' gastado</span><span>' + fmt(p,alloc) + ' asignado</span></div>' +
+      '</div>';
+    }).join("");
+
+    var orphanSpent = spent - Object.keys(spentByCat).reduce(function(s,catId){
+      return getCategory(p, catId) ? s + spentByCat[catId] : s;
+    }, 0);
+
+    return '<div class="stack">' +
+      storageWarning() +
+      '<div class="card">' +
+        '<div class="eyebrow">' + monthLabel(thisMonth) + '</div>' +
+        '<div class="headline tnum">' + fmt(p, remaining) + '</div>' +
+        '<div class="sub">disponible de ' + fmt(p, p.budget) + '</div>' +
+        '<div class="progress" style="margin-top:12px; height:10px;"><span style="width:' + Math.min(overallPct,100) + '%; background:' + (overallState==="danger"?"var(--danger)":overallState==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
+        '<div class="row" style="margin-top:8px; font-size:.78rem; color:var(--ink-soft);"><span>Gastado: ' + fmt(p,spent) + '</span><span>' + Math.round(overallPct) + '% del mes</span></div>' +
+      '</div>' +
+      '<div>' +
+        '<div class="section-title">Por categoría</div>' +
+        '<div class="card">' + catCards + '</div>' +
+        (orphanSpent > 0 ? '<p class="note-line">Gastos sin categoría (eliminada): ' + fmt(p, orphanSpent) + '</p>' : '') +
+      '</div>' +
+      '<div class="fab-row">' +
+        '<button class="btn block" data-action="add-expense">+ Registrar gasto</button>' +
+      '</div>' +
+      backupSection() +
+    '</div>';
+  }
+
+  // ---------- Presupuesto ----------
+  function viewPresupuesto(p){
+    var total = pctSum(p);
+    var bar = p.categories.map(function(c, idx){
+      var w = clamp(Number(c.percent)||0, 0, 100);
+      return '<span style="width:' + w + '%; background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span>';
+    }).join("");
+
+    var rows = p.categories.map(function(c, idx){
+      var amt = p.budget * ((Number(c.percent)||0)/100);
+      return '<div class="catrow">' +
+        '<span class="catdot" style="background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span>' +
+        '<input class="cat-name" data-id="' + c.id + '" value="' + esc(c.name) + '" maxlength="20" aria-label="Nombre de categoría">' +
+        '<input class="cat-percent" type="number" inputmode="numeric" min="0" max="100" step="1" data-id="' + c.id + '" value="' + c.percent + '" aria-label="Porcentaje">' +
+        '<span class="catamt tnum" id="amt-' + c.id + '">' + fmt(p, amt) + '</span>' +
+        '<button class="icon-btn" data-delcat="' + c.id + '" title="Eliminar categoría">✕</button>' +
+      '</div>';
+    }).join("");
+
+    return '<div class="stack">' +
+      '<div class="card">' +
+        '<div class="eyebrow">Presupuesto mensual</div>' +
+        '<div class="row" style="align-items:baseline; gap:8px; margin-top:6px;">' +
+          '<span style="font-family:var(--font-mono); font-size:1.3rem; color:var(--ink-faint);">' + esc(p.currency) + '</span>' +
+          '<input id="budget-input" type="number" min="0" step="1" inputmode="decimal" value="' + p.budget + '" ' +
+          'style="flex:1; font-family:var(--font-display); font-size:1.8rem; font-weight:600; background:none; border:none; border-bottom:2px solid var(--line); color:var(--ink); padding:2px 0;">' +
+        '</div>' +
+        '<p class="note-line">Cuánto ingresa (o dispones) cada mes.</p>' +
+      '</div>' +
+      '<div>' +
+        '<div class="section-title">Reparto por categoría</div>' +
+        '<div class="card">' +
+          '<div class="allocbar" id="alloc-bar">' + bar + '</div>' +
+          '<div class="pcttotal ' + (total===100?"ok":"warn") + '" id="pct-total">' +
+            '<span id="pct-total-value">' + total + '%</span>' +
+            '<span>' + (total===100 ? "Presupuesto totalmente asignado" : total < 100 ? "Faltan " + (100-total) + "% por asignar" : "Te pasaste " + (total-100) + "%") + '</span>' +
+          '</div>' +
+          '<div style="margin-top:12px;" id="cat-rows">' + rows + '</div>' +
+          '<button class="btn ghost block" style="margin-top:12px;" data-action="add-category">+ Añadir categoría</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function refreshBudgetComputed(p){
+    var total = pctSum(p);
+    p.categories.forEach(function(c){
+      var el = document.getElementById("amt-" + c.id);
+      if(el) el.textContent = fmt(p, p.budget * ((Number(c.percent)||0)/100));
+    });
+    var tv = document.getElementById("pct-total-value");
+    if(tv) tv.textContent = total + "%";
+    var wrap = document.getElementById("pct-total");
+    if(wrap){
+      wrap.classList.toggle("ok", total===100);
+      wrap.classList.toggle("warn", total!==100);
+      var msg = wrap.querySelector("span:last-child");
+      if(msg) msg.textContent = total===100 ? "Presupuesto totalmente asignado" : total < 100 ? "Faltan " + (100-total) + "% por asignar" : "Te pasaste " + (total-100) + "%";
+    }
+    var bar = document.getElementById("alloc-bar");
+    if(bar){
+      bar.innerHTML = p.categories.map(function(c, idx){
+        var w = clamp(Number(c.percent)||0, 0, 100);
+        return '<span style="width:' + w + '%; background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span>';
+      }).join("");
+    }
+  }
+
+  // ---------- Gastos ----------
+  function viewGastos(p){
+    var list = monthExpenses(p, uiMonth).slice().sort(function(a,b){ return b.date.localeCompare(a.date) || 0; });
+    var spent = monthTotalSpent(p, uiMonth);
+    var remaining = p.budget - spent;
+
+    var groups = {};
+    var order = [];
+    list.forEach(function(e){
+      if(!groups[e.date]){ groups[e.date] = []; order.push(e.date); }
+      groups[e.date].push(e);
+    });
+
+    var groupsHtml = order.map(function(date){
+      var rows = groups[date].map(function(e){
+        var cat = getCategory(p, e.categoryId);
+        var idx = cat ? p.categories.indexOf(cat) : -1;
+        return '<div class="exprow">' +
+          '<span class="catdot" style="background:' + (cat ? catColor(cat.colorIdx!=null?cat.colorIdx:idx) : "var(--ink-faint)") + '"></span>' +
+          '<div class="meta"><div class="cname">' + esc(cat ? cat.name : "Sin categoría") + '</div>' +
+          (e.note ? '<div class="note">' + esc(e.note) + '</div>' : '') + '</div>' +
+          '<div class="amt tnum">' + fmt(p, e.amount) + '</div>' +
+          '<button class="icon-btn" data-delexp="' + e.id + '" title="Eliminar">✕</button>' +
+        '</div>';
+      }).join("");
+      return '<div class="expday"><div class="expday-label">' + dayLabel(date) + '</div>' + rows + '</div>';
+    }).join("");
+
+    return '<div class="stack">' +
+      '<div class="monthnav">' +
+        '<button data-action="prev-month" aria-label="Mes anterior">‹</button>' +
+        '<span class="label">' + monthLabel(uiMonth) + '</span>' +
+        '<button data-action="next-month" aria-label="Mes siguiente">›</button>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="row"><div><div class="eyebrow">Gastado</div><div style="font-family:var(--font-mono); font-weight:700; font-size:1.15rem;">' + fmt(p,spent) + '</div></div>' +
+        '<div style="text-align:right;"><div class="eyebrow">Disponible</div><div style="font-family:var(--font-mono); font-weight:700; font-size:1.15rem; color:' + (remaining<0 ? "var(--danger)" : "var(--good)") + ';">' + fmt(p,remaining) + '</div></div></div>' +
+      '</div>' +
+      '<button class="btn block" data-action="add-expense">+ Registrar gasto</button>' +
+      '<div>' + (order.length ? groupsHtml : '<div class="empty">No hay gastos registrados este mes.</div>') + '</div>' +
+    '</div>';
+  }
+
+  function categoryOptions(p){
+    return p.categories.map(function(c){ return '<option value="' + c.id + '">' + esc(c.name) + '</option>'; }).join("");
+  }
+
+  function openAddExpense(){
+    var p = activeProfile();
+    if(!p.categories.length){
+      openSheet('<div class="sheet-head"><h3>Sin categorías</h3><button class="icon-btn" id="closeSheet">✕</button></div><p class="sub">Primero crea al menos una categoría en Presupuesto.</p>');
+      document.getElementById("closeSheet").addEventListener("click", closeSheet);
+      return;
+    }
+    openSheet(
+      '<div class="sheet-head"><h3>Registrar gasto</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="expForm" class="stack">' +
+        '<label class="field">Fecha<input type="date" id="expDate" value="' + todayStr() + '" required></label>' +
+        '<label class="field">Categoría<select id="expCat" required>' + categoryOptions(p) + '</select></label>' +
+        '<label class="field">Monto<input type="number" id="expAmount" min="0" step="0.01" inputmode="decimal" placeholder="0" required></label>' +
+        '<label class="field">Nota (opcional)<input type="text" id="expNote" maxlength="60" placeholder="Ej. Mercado de la semana"></label>' +
+        '<button class="btn block" type="submit">Guardar gasto</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("expForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var amount = Number(document.getElementById("expAmount").value);
+      if(!amount || amount <= 0) return;
+      p.expenses.push({
+        id: uid(),
+        date: document.getElementById("expDate").value || todayStr(),
+        categoryId: document.getElementById("expCat").value,
+        amount: amount,
+        note: document.getElementById("expNote").value.trim()
+      });
+      saveDB();
+      uiMonth = p.expenses[p.expenses.length-1].date.slice(0,7);
+      closeSheet();
+      currentTab = "gastos";
+      renderApp();
+    });
+  }
+
+  // ---------- Ahorros ----------
+  function buildGrowthChart(points){
+    if(points.length < 2){
+      return '<div class="empty">Agrega registros de ahorro o interés para ver tu progreso.</div>';
+    }
+    var w = 300, h = 110, pad = 8;
+    var max = points[points.length-1].cum;
+    var min = Math.min(0, points[0].cum);
+    var range = (max - min) || 1;
+    var stepX = (w - pad*2) / (points.length - 1);
+    var coords = points.map(function(pt, i){
+      var x = pad + i * stepX;
+      var y = h - pad - ((pt.cum - min) / range) * (h - pad*2);
+      return [x,y];
+    });
+    var path = coords.map(function(c,i){ return (i===0?"M":"L") + c[0].toFixed(1) + "," + c[1].toFixed(1); }).join(" ");
+    var areaPath = path + " L" + coords[coords.length-1][0].toFixed(1) + "," + (h-pad) + " L" + coords[0][0].toFixed(1) + "," + (h-pad) + " Z";
+    var last = coords[coords.length-1];
+    var gridLines = [0.25,0.5,0.75].map(function(f){
+      var y = pad + f * (h - pad*2);
+      return '<line x1="' + pad + '" y1="' + y + '" x2="' + (w-pad) + '" y2="' + y + '" stroke="var(--line)" stroke-width="1" />';
+    }).join("");
+    return '<div class="chartwrap"><svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+      '<defs><linearGradient id="growthFill" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.35"/>' +
+        '<stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>' +
+      '</linearGradient></defs>' +
+      gridLines +
+      '<path d="' + areaPath + '" fill="url(#growthFill)" stroke="none"/>' +
+      '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="4" fill="var(--accent)"/>' +
+    '</svg></div>';
+  }
+
+  function viewAhorros(p){
+    var totalSavings = p.savings.reduce(function(s,x){ return s+Number(x.amount); }, 0);
+    var totalInterest = p.interest.reduce(function(s,x){ return s+Number(x.amount); }, 0);
+    var patrimonio = totalSavings + totalInterest;
+
+    var combined = p.savings.map(function(x){ return {date:x.date, amount:Number(x.amount), type:"ahorro", note:x.note, id:x.id}; })
+      .concat(p.interest.map(function(x){ return {date:x.date, amount:Number(x.amount), type:"interes", note:x.note, id:x.id}; }));
+    var sortedAsc = combined.slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
+    var cum = 0;
+    var points = sortedAsc.map(function(e){ cum += e.amount; return {cum: cum}; });
+    if(points.length) points.unshift({cum:0});
+
+    var listDesc = combined.slice().sort(function(a,b){ return b.date.localeCompare(a.date); });
+    var rows = listDesc.map(function(e){
+      return '<div class="exprow">' +
+        '<span class="pill ' + (e.type==="ahorro"?"good":"warn") + '" style="min-width:56px; text-align:center;">' + (e.type==="ahorro"?"Ahorro":"Interés") + '</span>' +
+        '<div class="meta"><div class="cname">' + dateShort(e.date) + '</div>' + (e.note ? '<div class="note">' + esc(e.note) + '</div>' : '') + '</div>' +
+        '<div class="amt tnum">' + fmt(p, e.amount) + '</div>' +
+        '<button class="icon-btn" data-del' + (e.type==="ahorro"?"sav":"int") + '="' + e.id + '" title="Eliminar">✕</button>' +
+      '</div>';
+    }).join("");
+
+    return '<div class="stack">' +
+      '<div class="card">' +
+        '<div class="eyebrow">Patrimonio generado</div>' +
+        '<div class="headline tnum">' + fmt(p, patrimonio) + '</div>' +
+        '<div class="row" style="margin-top:10px; font-size:.82rem;">' +
+          '<span>Ahorrado: <b class="tnum">' + fmt(p,totalSavings) + '</b></span>' +
+          '<span>Intereses: <b class="tnum">' + fmt(p,totalInterest) + '</b></span>' +
+        '</div>' +
+        buildGrowthChart(points) +
+      '</div>' +
+      '<div class="fab-row">' +
+        '<button class="btn block" data-action="add-saving">+ Ahorro</button>' +
+        '<button class="btn secondary block" data-action="add-interest">+ Interés</button>' +
+      '</div>' +
+      '<div>' +
+        '<div class="section-title">Historial</div>' +
+        '<div class="card">' + (rows || '<div class="empty">Aún no has registrado ahorros ni intereses.</div>') + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function openAddMoney(kind){
+    var p = activeProfile();
+    var isSaving = kind === "saving";
+    openSheet(
+      '<div class="sheet-head"><h3>' + (isSaving ? "Registrar ahorro" : "Registrar interés") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="moneyForm" class="stack">' +
+        '<label class="field">Fecha<input type="date" id="mDate" value="' + todayStr() + '" required></label>' +
+        '<label class="field">Monto<input type="number" id="mAmount" min="0" step="0.01" inputmode="decimal" placeholder="0" required></label>' +
+        '<label class="field">Nota (opcional)<input type="text" id="mNote" maxlength="60" placeholder="' + (isSaving ? "Ej. Traslado a cuenta de ahorros" : "Ej. Rendimiento CDT") + '"></label>' +
+        '<button class="btn block" type="submit">Guardar</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("moneyForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var amount = Number(document.getElementById("mAmount").value);
+      if(!amount || amount <= 0) return;
+      var entry = { id: uid(), date: document.getElementById("mDate").value || todayStr(), amount: amount, note: document.getElementById("mNote").value.trim() };
+      (isSaving ? p.savings : p.interest).push(entry);
+      saveDB();
+      closeSheet();
+      currentTab = "ahorros";
+      renderApp();
+    });
+  }
+
+  // ---------- add category ----------
+  function addCategory(p){
+    var c = { id: uid(), name: "Nueva categoría", percent: 0, colorIdx: p.catColorSeq || p.categories.length };
+    p.catColorSeq = (p.catColorSeq || p.categories.length) + 1;
+    p.categories.push(c);
+    saveDB();
+    renderView();
+    requestAnimationFrame(function(){
+      var input = document.querySelector('.cat-name[data-id="' + c.id + '"]');
+      if(input){ input.focus(); input.select(); }
+    });
+  }
+
+  // ---------- event binding ----------
+  function bindViewEvents(){
+    var view = document.getElementById("view");
+    var p = activeProfile();
+
+    view.onclick = function(e){
+      var goto = e.target.closest("[data-goto]");
+      if(goto){ currentTab = goto.dataset.goto; renderView(); return; }
+
+      var action = e.target.closest("[data-action]");
+      if(action){
+        var a = action.dataset.action;
+        if(a === "add-expense") openAddExpense();
+        else if(a === "add-category") addCategory(p);
+        else if(a === "add-saving") openAddMoney("saving");
+        else if(a === "add-interest") openAddMoney("interest");
+        else if(a === "prev-month"){ uiMonth = ymAdd(uiMonth, -1); renderView(); }
+        else if(a === "next-month"){ uiMonth = ymAdd(uiMonth, 1); renderView(); }
+        else if(a === "export") exportAllData();
+        else if(a === "export-text") showBackupAsText();
+        else if(a === "import-text") openPasteImport();
+        else if(a === "import"){ document.getElementById("importFile").click(); }
+        return;
+      }
+
+      var delcat = e.target.closest("[data-delcat]");
+      if(delcat){
+        var id = delcat.dataset.delcat;
+        var cat = getCategory(p, id);
+        var hasExp = p.expenses.some(function(ex){ return ex.categoryId === id; });
+        var removeCat = function(){
+          p.categories = p.categories.filter(function(c){ return c.id !== id; });
+          saveDB();
+          renderView();
+        };
+        if(hasExp){
+          askConfirm({
+            title: "Eliminar " + (cat ? cat.name : "categoría"),
+            body: "Tiene gastos registrados. Si la eliminas, esos gastos seguirán contando en tu total del mes, pero aparecerán como “Sin categoría”.",
+            confirmLabel: "Eliminar categoría",
+            danger: true,
+            onConfirm: removeCat
+          });
+          return;
+        }
+        removeCat();
+        return;
+      }
+
+      var delexp = e.target.closest("[data-delexp]");
+      if(delexp){
+        p.expenses = p.expenses.filter(function(x){ return x.id !== delexp.dataset.delexp; });
+        saveDB(); renderView(); return;
+      }
+      var delsav = e.target.closest("[data-delsav]");
+      if(delsav){
+        p.savings = p.savings.filter(function(x){ return x.id !== delsav.dataset.delsav; });
+        saveDB(); renderView(); return;
+      }
+      var delint = e.target.closest("[data-delint]");
+      if(delint){
+        p.interest = p.interest.filter(function(x){ return x.id !== delint.dataset.delint; });
+        saveDB(); renderView(); return;
+      }
+    };
+
+    view.oninput = function(e){
+      if(e.target.id === "budget-input"){
+        p.budget = Number(e.target.value) || 0;
+        saveDB();
+        refreshBudgetComputed(p);
+        return;
+      }
+      if(e.target.classList.contains("cat-percent")){
+        var cat = getCategory(p, e.target.dataset.id);
+        if(cat){
+          cat.percent = clamp(Number(e.target.value)||0, 0, 999);
+          saveDB();
+          refreshBudgetComputed(p);
+        }
+        return;
+      }
+      if(e.target.classList.contains("cat-name")){
+        var cat2 = getCategory(p, e.target.dataset.id);
+        if(cat2){ cat2.name = e.target.value; saveDB(); }
+        return;
+      }
+    };
+
+    view.onchange = function(e){
+      if(e.target.id === "importFile"){
+        var file = e.target.files && e.target.files[0];
+        if(file) handleImportFile(file);
+        e.target.value = "";
+      }
+    };
+  }
+
+  renderApp();
+})();
+</script>
