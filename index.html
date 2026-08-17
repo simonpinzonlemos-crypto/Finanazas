@@ -1,4 +1,13 @@
 <title>Cuadre</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Presupuesto mensual por categorías, gastos diarios, ahorros e intereses.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cuadre">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#EFEDE2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#12160F" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAQOSURBVHhe7d0xilxXEIVh7ce78B6MxuANKFFsGBwKY7AWoMCZIgdek3EuvIQRz9HUg/KFCy3qHr7gS5qGOvT7k06633z3/ukFUry5vwAnEzRRBE0UQRNF0EQRNFEETRRBE0XQRBE0UQRNFEETRdBEETRRBE0UQRNF0EQRNFEETRRBE0XQRBE0UQRNFEETRdBEETRRBE0UQRNF0EQRNFEETRRBE0XQRBE0UQRNFEETRdBEETRRBE0UQRNF0EQRNFEETRRBE0XQRBE0UQRNFEETRdBEEfThnp7fvnz47fGuO/fbEwn6cFdsf3/+4eGuO/fbEwn6cIKuBH04QVeCPpygK0EfTtCVoA8n6ErQhxN0JejDCboS9OEEXQn6cIKuBH04QVeCPpygK0EfTtCVoA8n6ErQhxN0JejDCboS9OEEXQn6cIKuBH04QVeCPpygK0EfTtCVoA8n6ErQhxN0JejDCboS9OEEXQl6008fn18+/vXHw1137rdfE3Ql6E1XbP9++efhrjv3268JuhL0JkHPJOhNgp5J0JsEPZOgNwl6JkFvEvRMgt4k6JkEvUnQMwl6k6BnEvQmQc8k6E2CnknQmwQ9k6A3CXomQW8S9EyC3iTomQS9SdAzCXqToGcS9CZBzyToTYKeSdCbBD2ToDcJeiZBbxL0TILeJOiZjgt6yu9hXO+5x/cI15377dcEXR0X9JSQpuwQdCXoxiqkKTsEXQm6sQppyg5BV4JurEKaskPQlaAbq5Cm7BB0JejGKqQpOwRdCbqxCmnKDkFXgm6sQpqyQ9CVoBurkKbsEHQl6MYqpCk7BF0JurEKacoOQVeCbqxCmrJD0JWgG6uQpuwQdCXoxiqkKTsEXQm6sQppyg5BV4JurEKaskPQlaAbq5Cm7BB0JejGKqQpOwRdCbqxCmnKDkFXgm6sQpqyQ9CVoBurkKbsEHQl6MYqpCk7BF0JurEKacoOQVeCbqxCmrJD0JWgG6uQpuwQdCXoxiqkKTsEXQm6sQppyg5BV4JurEKaskPQlaAbq5Cm7BB0JejGKqQpOwRdCbqxCmnKDkFXgm6sQpqyQ9CVoBurkKbsEHQl6MYqpCk7BF0JurEKacoOQVeCbqxCmrJD0JWgG6uQpuwQdCXoxiqkKTsEXQm6sQppyg5BV8cFPeV/CqfseHp++19sj3bdud+e6Lig4f8ImiiCJoqgiSJooowP+vtf3r38+PvPDHM9l/uzmmB80NeH9+ufnxjmei73ZzWBoNki6E2CnknQmwQ9k6A3+VI4ky+F8A0ImiiCJoqgiSJoogiaKIImiqCJImiiCJoogiaKoIkiaKIImiiCJoqgiSJoogiaKIImiqCJImiiCJoogiaKoIkiaKIImiiCJoqgifIVa7hFebCfCNMAAAAASUVORK5CYII=">
 <style>
   :root{
     --bg:#EFEDE2;
@@ -69,7 +78,10 @@
   }
 
   *{box-sizing:border-box;}
+  /* Los campos en flex no se encogen por su ancho intrínseco: esto lo evita */
+  input,select,textarea{max-width:100%; min-width:0;}
   html,body{margin:0;padding:0;}
+  html{ -webkit-text-size-adjust:100%; }
   body{
     background:var(--bg);
     color:var(--ink);
@@ -77,9 +89,17 @@
     font-size:16px;
     line-height:1.45;
     min-height:100vh;
+    min-height:100dvh;
     -webkit-font-smoothing:antialiased;
+    overscroll-behavior-y:none;
   }
-  button{font-family:inherit;}
+  button{
+    font-family:inherit;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+    user-select:none; -webkit-user-select:none;
+  }
+  /* 16px evita que iOS haga zoom al enfocar un campo */
   input,select,textarea{font-family:inherit;font-size:16px;}
   button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible{
     outline:2px solid var(--accent); outline-offset:2px;
@@ -91,6 +111,7 @@
     max-width:480px;
     margin:0 auto;
     min-height:100vh;
+    min-height:100dvh;
     background:var(--surface);
     display:flex;
     flex-direction:column;
@@ -100,6 +121,7 @@
     body{padding:28px 16px;}
     .shell{
       min-height:calc(100vh - 56px);
+      min-height:calc(100dvh - 56px);
       border-radius:22px;
       box-shadow:var(--shadow);
       border:1px solid var(--line);
@@ -109,10 +131,14 @@
 
   .topbar{
     display:flex; align-items:center; justify-content:space-between;
-    gap:12px; padding:16px 18px 12px;
+    gap:12px;
+    padding:calc(16px + env(safe-area-inset-top)) 18px 12px;
     border-bottom:1px solid var(--line);
     background:var(--surface);
     position:sticky; top:0; z-index:5;
+  }
+  @media (min-width:560px){
+    .topbar{padding-top:16px;}
   }
   .brand{display:flex; align-items:center; gap:8px; font-family:var(--font-display); font-size:1.15rem; font-weight:600;}
   .brand .mark{font-size:1.25rem;}
@@ -120,13 +146,18 @@
     display:flex; align-items:center; gap:6px;
     background:var(--surface-2); color:var(--ink);
     border:1px solid var(--line); border-radius:999px;
-    padding:7px 12px 7px 14px; font-size:.85rem; font-weight:600;
-    cursor:pointer; max-width:52%;
+    padding:8px 12px 8px 14px; font-size:.85rem; font-weight:600;
+    cursor:pointer; max-width:52%; min-height:40px;
   }
+  .profile-pill:active{background:var(--line);}
   .profile-pill span.name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .profile-pill .caret{color:var(--ink-faint); font-size:.7rem;}
 
-  .view{flex:1; padding:16px 18px 100px; overflow-y:auto;}
+  .view{
+    flex:1; padding:16px 18px 40px; overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain;
+  }
 
   .tabbar{
     position:sticky; bottom:0; z-index:5;
@@ -138,9 +169,11 @@
   .tabbar button{
     background:none; border:none; color:var(--ink-faint);
     font-size:.72rem; font-weight:600; letter-spacing:.02em;
-    padding:8px 4px 6px; border-radius:12px; cursor:pointer;
-    display:flex; flex-direction:column; align-items:center; gap:4px;
+    padding:10px 4px 8px; border-radius:12px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+    min-height:52px;
   }
+  .tabbar button:active{background:var(--surface-2);}
   .tabbar button .dot{width:6px;height:6px;border-radius:50%;background:transparent;}
   .tabbar button.active{color:var(--accent);}
   .tabbar button.active .dot{background:var(--accent);}
@@ -173,11 +206,19 @@
   .btn.block{width:100%;}
   .btn.small{padding:7px 12px; font-size:.8rem; border-radius:10px;}
   .btn.ghost{background:none; border:1px dashed var(--line); color:var(--ink-soft);}
+  .btn{min-height:46px;}
+  .btn:active{transform:scale(.985); filter:brightness(.96);}
+  .btn.small{min-height:38px;}
+  @media (prefers-reduced-motion: reduce){ .btn:active{transform:none;} }
   .icon-btn{
     background:none; border:none; color:var(--ink-faint); cursor:pointer;
-    font-size:1rem; padding:4px 6px; border-radius:8px; line-height:1;
+    font-size:1rem; padding:0; border-radius:10px; line-height:1;
+    min-width:40px; min-height:40px;
+    display:inline-flex; align-items:center; justify-content:center;
+    flex-shrink:0;
   }
   .icon-btn:hover{color:var(--danger);}
+  .icon-btn:active{background:var(--surface-2); color:var(--danger);}
 
   label.field{display:flex; flex-direction:column; gap:6px; font-size:.8rem; color:var(--ink-soft); font-weight:600;}
   label.field input, label.field select, label.field textarea{
@@ -193,8 +234,8 @@
   .section-title:first-child{margin-top:0;}
 
   .catrow{
-    display:grid; grid-template-columns:10px 1fr 62px 84px 28px;
-    align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);
+    display:grid; grid-template-columns:10px minmax(0,1fr) 54px auto 40px;
+    align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--line);
   }
   .catrow:last-child{border-bottom:none;}
   .catdot{width:10px;height:10px;border-radius:50%;}
@@ -208,7 +249,23 @@
     padding:6px 4px; text-align:center; width:100%;
     color:var(--ink); font-weight:700; font-family:var(--font-mono);
   }
-  .catrow .catamt{font-family:var(--font-mono); font-size:.85rem; text-align:right;}
+  .catrow .catamt{font-family:var(--font-mono); font-size:.8rem; text-align:right; white-space:nowrap;}
+
+  /* Solo en pantallas muy angostas la fila pasa a dos líneas, para que el nombre se lea */
+  @media (max-width:344px){
+    .catrow{
+      grid-template-columns:10px minmax(0,1fr) auto 40px;
+      grid-template-areas:
+        "dot nombre nombre borrar"
+        "dot pct    monto  borrar";
+      row-gap:6px;
+    }
+    .catrow .catdot{grid-area:dot; align-self:center;}
+    .catrow .cat-name{grid-area:nombre;}
+    .catrow input.cat-percent{grid-area:pct; width:60px; justify-self:start;}
+    .catrow .catamt{grid-area:monto;}
+    .catrow .icon-btn{grid-area:borrar; align-self:center;}
+  }
 
   .allocbar{height:10px; border-radius:999px; overflow:hidden; display:flex; background:var(--line);}
   .allocbar span{height:100%;}
@@ -313,7 +370,12 @@
     .toast{transition:none;}
   }
 
-  .onboard{display:flex; flex-direction:column; justify-content:center; min-height:100vh; padding:32px 28px; gap:18px;}
+  .onboard{
+    display:flex; flex-direction:column; justify-content:center;
+    min-height:100vh; min-height:100dvh;
+    padding:calc(32px + env(safe-area-inset-top)) 28px calc(32px + env(safe-area-inset-bottom));
+    gap:18px;
+  }
   .onboard .mark{font-size:2.4rem;}
 </style>
 
@@ -602,7 +664,7 @@
       '<div class="sheet-head"><h3>Perfiles</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
       '<div id="profList">' + items + '</div>' +
       '<form id="newProfForm" class="row" style="margin-top:10px; gap:8px;">' +
-        '<input type="text" id="newProfName" placeholder="Nombre del nuevo perfil" maxlength="24" style="flex:1; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:var(--ink);" required>' +
+        '<input type="text" id="newProfName" placeholder="Nombre del nuevo perfil" maxlength="24" style="flex:1; min-width:0; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:var(--ink);" required>' +
         '<button class="btn small" type="submit">Crear</button>' +
       '</form>' +
       '<div class="section-title">Ajustes de "' + esc(p.name) + '"</div>' +
@@ -982,7 +1044,7 @@
         '<div class="row" style="align-items:baseline; gap:8px; margin-top:6px;">' +
           '<span style="font-family:var(--font-mono); font-size:1.3rem; color:var(--ink-faint);">' + esc(p.currency) + '</span>' +
           '<input id="budget-input" type="number" min="0" step="1" inputmode="decimal" value="' + p.budget + '" ' +
-          'style="flex:1; font-family:var(--font-display); font-size:1.8rem; font-weight:600; background:none; border:none; border-bottom:2px solid var(--line); color:var(--ink); padding:2px 0;">' +
+          'style="flex:1; min-width:0; width:100%; font-family:var(--font-display); font-size:1.8rem; font-weight:600; background:none; border:none; border-bottom:2px solid var(--line); color:var(--ink); padding:2px 0;">' +
         '</div>' +
         '<p class="note-line">Cuánto ingresa (o dispones) cada mes.</p>' +
       '</div>' +
