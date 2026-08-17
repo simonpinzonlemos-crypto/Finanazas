@@ -330,6 +330,60 @@
   .chartwrap{margin-top:6px;}
   .chartwrap svg{width:100%; height:auto; display:block;}
 
+  /* ----- dona de distribución ----- */
+  .donut-wrap{display:flex; flex-direction:column; gap:14px; align-items:center;}
+  .donut-wrap svg{width:190px; height:190px; display:block; flex-shrink:0;}
+  .donut-total{
+    font-family:var(--font-display); font-size:19px; font-weight:600;
+    fill:var(--ink); font-variant-numeric:tabular-nums;
+  }
+  .donut-sub{font-family:var(--font-body); font-size:10px; fill:var(--ink-faint);}
+  .leyenda{width:100%; display:flex; flex-direction:column;}
+  .leg-row{
+    display:grid; grid-template-columns:10px minmax(0,1fr) 38px auto;
+    align-items:center; gap:8px; padding:7px 0;
+    border-bottom:1px solid var(--line); font-size:.82rem;
+  }
+  .leg-row:last-child{border-bottom:none;}
+  .leg-name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;}
+  .leg-pct{text-align:right; color:var(--ink-soft); font-weight:700;}
+  .leg-val{text-align:right; font-family:var(--font-mono); font-size:.78rem;}
+  @media (min-width:420px){
+    .donut-wrap{flex-direction:row; align-items:center; gap:18px;}
+    .donut-wrap svg{width:170px; height:170px;}
+  }
+
+  /* ----- metas ----- */
+  .goal{padding:12px 0; border-bottom:1px solid var(--line);}
+  .goal:first-child{padding-top:0;}
+  .goal:last-child{border-bottom:none; padding-bottom:0;}
+  .goal .row{margin-bottom:8px;}
+  .goal-name{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .goal .amounts{font-family:var(--font-mono); font-size:.75rem; color:var(--ink-soft);}
+
+  /* ----- tipos de ahorro ----- */
+  .hold{padding:14px 0; border-bottom:1px solid var(--line);}
+  .hold:first-child{padding-top:0;}
+  .hold:last-child{border-bottom:none; padding-bottom:0;}
+  .hold-name{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .hold-kind{font-size:.7rem; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.04em;}
+  .hold-total{font-family:var(--font-mono); font-weight:700; font-size:.95rem; white-space:nowrap;}
+  .hold-grid{
+    display:grid; grid-template-columns:repeat(2, minmax(0,1fr));
+    gap:8px 12px; margin-top:10px;
+  }
+  .hold-grid > div{display:flex; flex-direction:column; gap:1px; min-width:0;}
+  .hold-k{font-size:.68rem; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.04em;}
+  .hold-v{font-size:.85rem; font-weight:600;}
+  .hold-v.pos{color:var(--good);}
+  .hold-v.neg{color:var(--danger);}
+  .pos{color:var(--good);} .neg{color:var(--danger);}
+  .hold-foot{
+    margin-top:10px; padding-top:8px; border-top:1px dashed var(--line);
+    font-size:.75rem; color:var(--ink-soft);
+  }
+  .kind-fields{gap:12px;}
+
   .pill{display:inline-block; padding:2px 9px; border-radius:999px; font-size:.7rem; font-weight:700;}
   .pill.good{background:var(--accent-soft); color:var(--good);}
   .pill.warn{background:var(--warn-soft); color:var(--warn);}
@@ -478,13 +532,26 @@
       catColorSeq: 6,
       categories: seedCategories(),
       expenses: [], savings: [], interest: [],
+      goals: [], holdings: [],
       createdAt: Date.now()
     };
     DB.active = id;
     saveDB();
     return id;
   }
-  function activeProfile(){ return DB.profiles[DB.active]; }
+
+  // Los perfiles creados antes de esta versión no traen metas ni tipos de ahorro.
+  function normalizeProfile(p){
+    if(!p) return p;
+    if(!Array.isArray(p.goals)) p.goals = [];
+    if(!Array.isArray(p.holdings)) p.holdings = [];
+    if(!Array.isArray(p.savings)) p.savings = [];
+    if(!Array.isArray(p.interest)) p.interest = [];
+    if(!Array.isArray(p.expenses)) p.expenses = [];
+    if(!Array.isArray(p.categories)) p.categories = [];
+    return p;
+  }
+  function activeProfile(){ return normalizeProfile(DB.profiles[DB.active]); }
 
   function fmt(p, n){
     var v = Number(n) || 0;
@@ -495,6 +562,54 @@
   }
 
   function catColor(idx){ return "var(--cat-" + ((idx % CAT_COLORS) + 1) + ")"; }
+
+  // ---------- tipos de ahorro ----------
+  var KIND_LABEL = { cuenta:"Cuenta / Efectivo", cdt:"CDT", accion:"Acción" };
+
+  function daysBetween(fromStr, to){
+    var parts = String(fromStr || "").split("-");
+    if(parts.length !== 3) return 0;
+    var from = new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+    var ms = (to || new Date()) - from;
+    return Math.max(0, Math.floor(ms / 86400000));
+  }
+
+  // Tasa efectiva anual: valor = capital * (1 + tasa)^(días/365)
+  function cdtValueAt(h, days){
+    var principal = Number(h.principal) || 0;
+    var rate = (Number(h.rate) || 0) / 100;
+    if(principal <= 0) return 0;
+    if(rate <= 0) return principal;
+    return principal * Math.pow(1 + rate, days / 365);
+  }
+  function cdtTermDays(h){ return Math.round((Number(h.termMonths) || 0) * 30.4375); }
+  function cdtElapsedDays(h){
+    var term = cdtTermDays(h);
+    var elapsed = daysBetween(h.startDate);
+    return term > 0 ? Math.min(elapsed, term) : elapsed;
+  }
+
+  function holdingValue(h){
+    if(!h) return 0;
+    if(h.kind === "cuenta") return Number(h.amount) || 0;
+    if(h.kind === "cdt") return cdtValueAt(h, cdtElapsedDays(h));
+    if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.price) || 0);
+    return 0;
+  }
+  // Lo que pusiste de tu bolsillo, sin rendimientos
+  function holdingCost(h){
+    if(!h) return 0;
+    if(h.kind === "cuenta") return Number(h.amount) || 0;
+    if(h.kind === "cdt") return Number(h.principal) || 0;
+    if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.buyPrice) || Number(h.price) || 0);
+    return 0;
+  }
+  function totalHoldings(p){
+    return p.holdings.reduce(function(s,h){ return s + holdingValue(h); }, 0);
+  }
+  function totalHoldingsCost(p){
+    return p.holdings.reduce(function(s,h){ return s + holdingCost(h); }, 0);
+  }
   function getCategory(p, id){
     for(var i=0;i<p.categories.length;i++){ if(p.categories[i].id === id) return p.categories[i]; }
     return null;
@@ -805,6 +920,8 @@
         expenses: Array.isArray(pr.expenses) ? pr.expenses : [],
         savings: Array.isArray(pr.savings) ? pr.savings : [],
         interest: Array.isArray(pr.interest) ? pr.interest : [],
+        goals: Array.isArray(pr.goals) ? pr.goals : [],
+        holdings: Array.isArray(pr.holdings) ? pr.holdings : [],
         createdAt: pr.createdAt || Date.now()
       };
       count++;
@@ -1205,6 +1322,49 @@
     '</svg></div>';
   }
 
+  // Dona SVG: un arco por cada tipo de ahorro
+  function buildDonut(slices, total, p){
+    var size = 200, cx = 100, cy = 100, r = 72, grosor = 26;
+    if(!slices.length || total <= 0){
+      return '<div class="empty">Agrega un tipo de ahorro para ver la distribución.</div>';
+    }
+    var circ = 2 * Math.PI * r;
+    var offset = 0;
+    var arcos = slices.map(function(s){
+      var frac = s.value / total;
+      var len = frac * circ;
+      // 0.6 de separación visual entre porciones, sin dejar huecos si solo hay una
+      var gap = slices.length > 1 ? 1.5 : 0;
+      var dash = Math.max(0, len - gap) + ' ' + (circ - Math.max(0, len - gap));
+      var el = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
+        'stroke="' + s.color + '" stroke-width="' + grosor + '" ' +
+        'stroke-dasharray="' + dash + '" stroke-dashoffset="' + (-offset) + '" ' +
+        'transform="rotate(-90 ' + cx + ' ' + cy + ')"><title>' + esc(s.label) + ': ' + Math.round(frac*100) + '%</title></circle>';
+      offset += len;
+      return el;
+    }).join("");
+
+    var leyenda = slices.map(function(s){
+      var pct = total > 0 ? (s.value / total) * 100 : 0;
+      return '<div class="leg-row">' +
+        '<span class="catdot" style="background:' + s.color + '"></span>' +
+        '<span class="leg-name">' + esc(s.label) + '</span>' +
+        '<span class="leg-pct tnum">' + (pct < 1 && pct > 0 ? "<1" : Math.round(pct)) + '%</span>' +
+        '<span class="leg-val tnum">' + fmt(p, s.value) + '</span>' +
+      '</div>';
+    }).join("");
+
+    return '<div class="donut-wrap">' +
+      '<svg viewBox="0 0 ' + size + ' ' + size + '" role="img" aria-label="Distribución de tus ahorros">' +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--line)" stroke-width="' + grosor + '"/>' +
+        arcos +
+        '<text x="' + cx + '" y="' + (cy - 4) + '" text-anchor="middle" class="donut-total">' + fmt(p, total) + '</text>' +
+        '<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" class="donut-sub">en ' + slices.length + (slices.length===1 ? ' lugar' : ' lugares') + '</text>' +
+      '</svg>' +
+      '<div class="leyenda">' + leyenda + '</div>' +
+    '</div>';
+  }
+
   function viewAhorros(p){
     var totalSavings = p.savings.reduce(function(s,x){ return s+Number(x.amount); }, 0);
     var totalInterest = p.interest.reduce(function(s,x){ return s+Number(x.amount); }, 0);
@@ -1227,23 +1387,152 @@
       '</div>';
     }).join("");
 
+    // ----- valor actual según los tipos de ahorro -----
+    var holdTotal = totalHoldings(p);
+    var holdCost = totalHoldingsCost(p);
+    var rendimiento = holdTotal - holdCost;
+    var hayTipos = p.holdings.length > 0;
+    var totalReferencia = hayTipos ? holdTotal : patrimonio;
+
+    var slices = p.holdings.map(function(h, i){
+      return { label: h.name || KIND_LABEL[h.kind] || "Sin nombre",
+               value: holdingValue(h),
+               color: catColor(h.colorIdx != null ? h.colorIdx : i) };
+    }).filter(function(s){ return s.value > 0; });
+
+    // ----- metas -----
+    var metasHtml = p.goals.map(function(g){
+      var target = Number(g.target) || 0;
+      var pct = target > 0 ? clamp((totalReferencia / target) * 100, 0, 100) : 0;
+      var falta = Math.max(0, target - totalReferencia);
+      var cumplida = target > 0 && totalReferencia >= target;
+      return '<div class="goal">' +
+        '<div class="row">' +
+          '<span class="goal-name">' + esc(g.name) + '</span>' +
+          '<div class="row" style="gap:6px;">' +
+            '<span class="pill ' + (cumplida ? "good" : "warn") + '">' + Math.round(pct) + '%</span>' +
+            '<button class="icon-btn" data-delgoal="' + g.id + '" title="Eliminar meta">✕</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="progress"><span style="width:' + pct + '%; background:' + (cumplida ? "var(--good)" : "var(--accent)") + '"></span></div>' +
+        '<div class="amounts row" style="margin-top:6px;">' +
+          '<span>' + fmt(p, Math.min(totalReferencia, target)) + ' de ' + fmt(p, target) + '</span>' +
+          '<span>' + (cumplida ? "¡Meta cumplida!" : "Faltan " + fmt(p, falta)) + '</span>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+
+    // ----- lista de tipos de ahorro -----
+    var tiposHtml = p.holdings.map(function(h, i){
+      var color = catColor(h.colorIdx != null ? h.colorIdx : i);
+      var valor = holdingValue(h);
+      var detalle = "";
+
+      if(h.kind === "cdt"){
+        var termDays = cdtTermDays(h);
+        var elapsed = cdtElapsedDays(h);
+        var restantes = Math.max(0, termDays - elapsed);
+        var interesHoy = valor - (Number(h.principal) || 0);
+        var alVencer = cdtValueAt(h, termDays);
+        var gananciaTotal = alVencer - (Number(h.principal) || 0);
+        detalle =
+          '<div class="hold-grid">' +
+            '<div><span class="hold-k">Capital</span><span class="hold-v tnum">' + fmt(p, h.principal) + '</span></div>' +
+            '<div><span class="hold-k">Tasa</span><span class="hold-v tnum">' + (Number(h.rate)||0) + '% E.A.</span></div>' +
+            '<div><span class="hold-k">Interés a hoy</span><span class="hold-v tnum pos">+' + fmt(p, interesHoy) + '</span></div>' +
+            '<div><span class="hold-k">' + (restantes > 0 ? "Faltan" : "Estado") + '</span><span class="hold-v">' + (restantes > 0 ? restantes + " días" : "Vencido") + '</span></div>' +
+          '</div>' +
+          '<div class="hold-foot">Al vencer (' + (Number(h.termMonths)||0) + ' meses): <b class="tnum">' + fmt(p, alVencer) + '</b> · ganas <b class="tnum">' + fmt(p, gananciaTotal) + '</b></div>';
+      } else if(h.kind === "accion"){
+        var shares = Number(h.shares) || 0;
+        var price = Number(h.price) || 0;
+        var buy = Number(h.buyPrice) || 0;
+        var costo = shares * buy;
+        var dif = valor - costo;
+        var difPct = costo > 0 ? (dif / costo) * 100 : 0;
+        detalle =
+          '<div class="hold-grid">' +
+            '<div><span class="hold-k">Cantidad</span><span class="hold-v tnum">' + shares + '</span></div>' +
+            '<div><span class="hold-k">Precio actual</span><span class="hold-v tnum">' + fmt(p, price) + '</span></div>' +
+            '<div><span class="hold-k">Precio compra</span><span class="hold-v tnum">' + (buy ? fmt(p, buy) : "—") + '</span></div>' +
+            '<div><span class="hold-k">Ganancia</span><span class="hold-v tnum ' + (dif >= 0 ? "pos" : "neg") + '">' + (dif >= 0 ? "+" : "") + fmt(p, dif) + (costo > 0 ? " (" + (dif>=0?"+":"") + difPct.toFixed(1) + "%)" : "") + '</span></div>' +
+          '</div>' +
+          '<div class="hold-foot">' +
+            (h.ticker ? 'Símbolo <b>' + esc(h.ticker.toUpperCase()) + '</b> · ' : '') +
+            (h.updatedAt ? 'precio actualizado ' + esc(h.updatedAt) : 'precio puesto por ti') +
+            (h.quoteCurrency ? ' · cotiza en <b>' + esc(h.quoteCurrency) + '</b>' : '') +
+          '</div>';
+      } else {
+        detalle = '<div class="hold-foot">Saldo que tienes guardado en este lugar.</div>';
+      }
+
+      return '<div class="hold">' +
+        '<div class="row">' +
+          '<div class="row" style="gap:8px; min-width:0;">' +
+            '<span class="catdot" style="background:' + color + '"></span>' +
+            '<div style="min-width:0;">' +
+              '<div class="hold-name">' + esc(h.name || KIND_LABEL[h.kind]) + '</div>' +
+              '<div class="hold-kind">' + esc(KIND_LABEL[h.kind] || "") + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="row" style="gap:4px;">' +
+            '<span class="hold-total tnum">' + fmt(p, valor) + '</span>' +
+            '<button class="icon-btn" data-edithold="' + h.id + '" title="Editar">✎</button>' +
+            '<button class="icon-btn" data-delhold="' + h.id + '" title="Eliminar">✕</button>' +
+          '</div>' +
+        '</div>' +
+        detalle +
+      '</div>';
+    }).join("");
+
+    var hayAcciones = p.holdings.some(function(h){ return h.kind === "accion" && h.ticker; });
+
     return '<div class="stack">' +
       '<div class="card">' +
-        '<div class="eyebrow">Patrimonio generado</div>' +
-        '<div class="headline tnum">' + fmt(p, patrimonio) + '</div>' +
-        '<div class="row" style="margin-top:10px; font-size:.82rem;">' +
-          '<span>Ahorrado: <b class="tnum">' + fmt(p,totalSavings) + '</b></span>' +
-          '<span>Intereses: <b class="tnum">' + fmt(p,totalInterest) + '</b></span>' +
-        '</div>' +
-        buildGrowthChart(points) +
+        '<div class="eyebrow">' + (hayTipos ? "Valor actual de tus ahorros" : "Patrimonio registrado") + '</div>' +
+        '<div class="headline tnum">' + fmt(p, totalReferencia) + '</div>' +
+        (hayTipos
+          ? '<div class="row" style="margin-top:10px; font-size:.82rem;">' +
+              '<span>Invertido: <b class="tnum">' + fmt(p, holdCost) + '</b></span>' +
+              '<span>Rendimiento: <b class="tnum ' + (rendimiento >= 0 ? "pos" : "neg") + '">' + (rendimiento >= 0 ? "+" : "") + fmt(p, rendimiento) + '</b></span>' +
+            '</div>'
+          : '<div class="row" style="margin-top:10px; font-size:.82rem;">' +
+              '<span>Aportado: <b class="tnum">' + fmt(p,totalSavings) + '</b></span>' +
+              '<span>Intereses: <b class="tnum">' + fmt(p,totalInterest) + '</b></span>' +
+            '</div>') +
       '</div>' +
-      '<div class="fab-row">' +
-        '<button class="btn block" data-action="add-saving">+ Ahorro</button>' +
-        '<button class="btn secondary block" data-action="add-interest">+ Interés</button>' +
-      '</div>' +
+
       '<div>' +
-        '<div class="section-title">Historial</div>' +
-        '<div class="card">' + (rows || '<div class="empty">Aún no has registrado ahorros ni intereses.</div>') + '</div>' +
+        '<div class="section-title">Dónde está tu dinero</div>' +
+        '<div class="card">' + buildDonut(slices, holdTotal, p) + '</div>' +
+      '</div>' +
+
+      '<div>' +
+        '<div class="section-title">Tipos de ahorro</div>' +
+        '<div class="card">' + (tiposHtml || '<div class="empty">Agrega una cuenta, un CDT o una acción para ver aquí tu dinero repartido.</div>') + '</div>' +
+        '<div class="fab-row">' +
+          '<button class="btn block" data-action="add-holding">+ Agregar tipo</button>' +
+          (hayAcciones ? '<button class="btn secondary block" data-action="refresh-prices">Actualizar precios</button>' : '') +
+        '</div>' +
+      '</div>' +
+
+      '<div>' +
+        '<div class="section-title">Metas de ahorro</div>' +
+        '<div class="card">' + (metasHtml || '<div class="empty">Ponte una meta y mira cuánto te falta.</div>') + '</div>' +
+        (p.goals.length ? '<p class="note-line">El avance se mide contra ' + (hayTipos ? "el valor actual de tus tipos de ahorro." : "lo que llevas registrado en movimientos.") + '</p>' : '') +
+        '<button class="btn ghost block" style="margin-top:12px;" data-action="add-goal">+ Nueva meta</button>' +
+      '</div>' +
+
+      '<div>' +
+        '<div class="section-title">Movimientos</div>' +
+        '<div class="card">' +
+          buildGrowthChart(points) +
+          (rows || '<div class="empty">Aún no has registrado aportes ni intereses.</div>') +
+        '</div>' +
+        '<div class="fab-row">' +
+          '<button class="btn secondary block" data-action="add-saving">+ Aporte</button>' +
+          '<button class="btn secondary block" data-action="add-interest">+ Interés</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   }
@@ -1271,6 +1560,176 @@
       closeSheet();
       currentTab = "ahorros";
       renderApp();
+    });
+  }
+
+  // ---------- metas ----------
+  function openAddGoal(){
+    var p = activeProfile();
+    openSheet(
+      '<div class="sheet-head"><h3>Nueva meta de ahorro</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="goalForm" class="stack">' +
+        '<label class="field">¿Para qué ahorras?<input type="text" id="goalName" maxlength="40" placeholder="Ej. Viaje, fondo de emergencia" required></label>' +
+        '<label class="field">¿Cuánto quieres reunir?<input type="number" id="goalTarget" min="1" step="0.01" inputmode="decimal" placeholder="0" required></label>' +
+        '<button class="btn block" type="submit">Crear meta</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("goalForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var name = document.getElementById("goalName").value.trim();
+      var target = Number(document.getElementById("goalTarget").value);
+      if(!name || !target || target <= 0) return;
+      p.goals.push({ id: uid(), name: name, target: target, createdAt: Date.now() });
+      saveDB();
+      closeSheet();
+      currentTab = "ahorros";
+      renderApp();
+      showToast('Meta "' + name + '" creada.');
+    });
+  }
+
+  // ---------- tipos de ahorro ----------
+  function holdingFormFields(h){
+    h = h || {};
+    var kind = h.kind || "cuenta";
+    return '' +
+      '<label class="field">Tipo' +
+        '<select id="hKind">' +
+          '<option value="cuenta"' + (kind==="cuenta"?" selected":"") + '>Cuenta de ahorros / Efectivo</option>' +
+          '<option value="cdt"' + (kind==="cdt"?" selected":"") + '>CDT (a término fijo)</option>' +
+          '<option value="accion"' + (kind==="accion"?" selected":"") + '>Acción en bolsa</option>' +
+        '</select>' +
+      '</label>' +
+      '<label class="field">Nombre<input type="text" id="hName" maxlength="30" value="' + esc(h.name || "") + '" placeholder="Ej. Bancolombia, CDT 6 meses, Apple" required></label>' +
+
+      '<div id="campos-cuenta" class="stack kind-fields">' +
+        '<label class="field">Saldo actual<input type="number" id="hAmount" min="0" step="0.01" inputmode="decimal" value="' + (h.amount != null ? h.amount : "") + '" placeholder="0"></label>' +
+      '</div>' +
+
+      '<div id="campos-cdt" class="stack kind-fields">' +
+        '<label class="field">Capital invertido<input type="number" id="hPrincipal" min="0" step="0.01" inputmode="decimal" value="' + (h.principal != null ? h.principal : "") + '" placeholder="0"></label>' +
+        '<label class="field">Tasa de interés anual (E.A. %)<input type="number" id="hRate" min="0" step="0.01" inputmode="decimal" value="' + (h.rate != null ? h.rate : "") + '" placeholder="Ej. 11.5"></label>' +
+        '<label class="field">Fecha de apertura<input type="date" id="hStart" value="' + esc(h.startDate || todayStr()) + '"></label>' +
+        '<label class="field">Plazo en meses<input type="number" id="hTerm" min="1" step="1" inputmode="numeric" value="' + (h.termMonths != null ? h.termMonths : "") + '" placeholder="Ej. 12"></label>' +
+      '</div>' +
+
+      '<div id="campos-accion" class="stack kind-fields">' +
+        '<label class="field">Símbolo en bolsa<input type="text" id="hTicker" maxlength="12" value="' + esc(h.ticker || "") + '" placeholder="Ej. AAPL, MSFT, TSLA" autocapitalize="characters"></label>' +
+        '<label class="field">Cantidad de acciones<input type="number" id="hShares" min="0" step="0.0001" inputmode="decimal" value="' + (h.shares != null ? h.shares : "") + '" placeholder="0"></label>' +
+        '<label class="field">Precio de compra (por acción)<input type="number" id="hBuy" min="0" step="0.01" inputmode="decimal" value="' + (h.buyPrice != null ? h.buyPrice : "") + '" placeholder="0"></label>' +
+        '<label class="field">Precio actual (por acción)<input type="number" id="hPrice" min="0" step="0.01" inputmode="decimal" value="' + (h.price != null ? h.price : "") + '" placeholder="0"></label>' +
+        '<p class="note-line">Si pones el símbolo, el botón “Actualizar precios” trae el precio del mercado por ti. ' +
+        'Ojo: las acciones de EE. UU. cotizan en dólares, así que ese precio llega en dólares — si tu presupuesto está en otra moneda, conviértelo a mano para que el total tenga sentido.</p>' +
+      '</div>';
+  }
+
+  function wireKindSwitch(){
+    var sel = document.getElementById("hKind");
+    function pintar(){
+      var k = sel.value;
+      ["cuenta","cdt","accion"].forEach(function(x){
+        document.getElementById("campos-" + x).style.display = (x === k) ? "flex" : "none";
+      });
+    }
+    sel.addEventListener("change", pintar);
+    pintar();
+  }
+
+  function openHoldingSheet(existing){
+    var p = activeProfile();
+    var editando = !!existing;
+    openSheet(
+      '<div class="sheet-head"><h3>' + (editando ? "Editar tipo de ahorro" : "Agregar tipo de ahorro") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="holdForm" class="stack">' +
+        holdingFormFields(existing) +
+        '<button class="btn block" type="submit">' + (editando ? "Guardar cambios" : "Agregar") + '</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    wireKindSwitch();
+    document.getElementById("holdForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var kind = document.getElementById("hKind").value;
+      var name = document.getElementById("hName").value.trim();
+      if(!name) return;
+      var h = existing || { id: uid(), colorIdx: p.holdings.length };
+      h.kind = kind;
+      h.name = name;
+
+      if(kind === "cuenta"){
+        h.amount = Number(document.getElementById("hAmount").value) || 0;
+      } else if(kind === "cdt"){
+        h.principal = Number(document.getElementById("hPrincipal").value) || 0;
+        h.rate = Number(document.getElementById("hRate").value) || 0;
+        h.startDate = document.getElementById("hStart").value || todayStr();
+        h.termMonths = Number(document.getElementById("hTerm").value) || 0;
+      } else {
+        h.ticker = document.getElementById("hTicker").value.trim().toUpperCase();
+        h.shares = Number(document.getElementById("hShares").value) || 0;
+        h.buyPrice = Number(document.getElementById("hBuy").value) || 0;
+        h.price = Number(document.getElementById("hPrice").value) || 0;
+      }
+
+      if(!existing) p.holdings.push(h);
+      saveDB();
+      closeSheet();
+      currentTab = "ahorros";
+      renderApp();
+      showToast(editando ? "Cambios guardados." : '"' + name + '" agregado.');
+    });
+  }
+
+  // Trae el precio de mercado. Solo funciona donde la página puede salir a
+  // internet (archivo propio o sitio publicado), no dentro del visor de Claude.
+  function fetchQuote(ticker){
+    var destino = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+      encodeURIComponent(ticker) + "?interval=1d&range=1d";
+    var url = "https://corsproxy.io/?" + encodeURIComponent(destino);
+    var ctrl = new AbortController();
+    var corte = setTimeout(function(){ ctrl.abort(); }, 12000);
+    return fetch(url, { signal: ctrl.signal })
+      .then(function(r){
+        clearTimeout(corte);
+        if(!r.ok) throw new Error("no encontrado");
+        return r.json();
+      })
+      .then(function(j){
+        var meta = j && j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
+        var precio = meta && meta.regularMarketPrice;
+        if(typeof precio !== "number") throw new Error("sin precio");
+        return { price: precio, currency: (meta.currency || "").toUpperCase() };
+      });
+  }
+
+  function refreshPrices(){
+    var p = activeProfile();
+    var acciones = p.holdings.filter(function(h){ return h.kind === "accion" && h.ticker; });
+    if(!acciones.length){
+      showMessageSheet("Sin acciones", "Agrega una acción con su símbolo (por ejemplo AAPL) para poder actualizar precios.");
+      return;
+    }
+    showToast("Consultando precios…");
+    var listos = 0, fallidos = [];
+    var hoy = new Intl.DateTimeFormat("es", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}).format(new Date());
+
+    Promise.all(acciones.map(function(h){
+      return fetchQuote(h.ticker)
+        .then(function(q){ h.price = q.price; h.quoteCurrency = q.currency; h.updatedAt = hoy; listos++; })
+        .catch(function(){ fallidos.push(h.ticker); });
+    })).then(function(){
+      saveDB();
+      renderView();
+      if(listos && !fallidos.length){
+        showToast(listos === 1 ? "Precio actualizado." : listos + " precios actualizados.");
+      } else if(listos){
+        showToast(listos + " actualizados. Sin datos para: " + fallidos.join(", ") + ".");
+      } else {
+        showMessageSheet("No se pudieron traer los precios",
+          "Revisa tu conexión y que los símbolos sean correctos (por ejemplo AAPL). " +
+          "Dentro del visor de Claude esta consulta está bloqueada: funciona al abrir la app desde tu archivo o desde tu sitio publicado. " +
+          "Mientras tanto puedes escribir el precio a mano editando la acción.");
+      }
     });
   }
 
@@ -1309,6 +1768,9 @@
         else if(a === "export-text") showBackupAsText();
         else if(a === "import-text") openPasteImport();
         else if(a === "import"){ document.getElementById("importFile").click(); }
+        else if(a === "add-goal") openAddGoal();
+        else if(a === "add-holding") openHoldingSheet(null);
+        else if(a === "refresh-prices") refreshPrices();
         return;
       }
 
@@ -1333,6 +1795,51 @@
           return;
         }
         removeCat();
+        return;
+      }
+
+      var delgoal = e.target.closest("[data-delgoal]");
+      if(delgoal){
+        var gid = delgoal.dataset.delgoal;
+        var goal = null;
+        for(var gi=0; gi<p.goals.length; gi++){ if(p.goals[gi].id === gid) goal = p.goals[gi]; }
+        askConfirm({
+          title: "Eliminar meta",
+          body: 'Se quitará la meta "' + (goal ? goal.name : "") + '". Tus ahorros no se tocan.',
+          confirmLabel: "Eliminar meta",
+          danger: true,
+          onConfirm: function(){
+            p.goals = p.goals.filter(function(g){ return g.id !== gid; });
+            saveDB(); renderView();
+          }
+        });
+        return;
+      }
+
+      var edithold = e.target.closest("[data-edithold]");
+      if(edithold){
+        var hid = edithold.dataset.edithold;
+        for(var hi=0; hi<p.holdings.length; hi++){
+          if(p.holdings[hi].id === hid){ openHoldingSheet(p.holdings[hi]); break; }
+        }
+        return;
+      }
+
+      var delhold = e.target.closest("[data-delhold]");
+      if(delhold){
+        var hid2 = delhold.dataset.delhold;
+        var hold = null;
+        for(var hj=0; hj<p.holdings.length; hj++){ if(p.holdings[hj].id === hid2) hold = p.holdings[hj]; }
+        askConfirm({
+          title: "Eliminar " + (hold ? hold.name : "tipo de ahorro"),
+          body: "Se quitará de tu distribución de ahorros. Tus movimientos registrados no se tocan.",
+          confirmLabel: "Eliminar",
+          danger: true,
+          onConfirm: function(){
+            p.holdings = p.holdings.filter(function(h){ return h.id !== hid2; });
+            saveDB(); renderView();
+          }
+        });
         return;
       }
 
