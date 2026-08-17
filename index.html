@@ -367,7 +367,9 @@
   .hold:last-child{border-bottom:none; padding-bottom:0;}
   .hold-name{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .hold-kind{font-size:.7rem; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.04em;}
-  .hold-total{font-family:var(--font-mono); font-weight:700; font-size:.95rem; white-space:nowrap;}
+  .hold-total{font-family:var(--font-mono); font-weight:700; font-size:.95rem; white-space:nowrap; text-align:right;}
+  /* El valor en dólares va debajo del total en pesos, en chiquito */
+  .hold-native{display:block; font-weight:600; font-size:.72rem; color:var(--ink-faint);}
   .hold-grid{
     display:grid; grid-template-columns:repeat(2, minmax(0,1fr));
     gap:8px 12px; margin-top:10px;
@@ -390,6 +392,13 @@
   .pill.danger{background:var(--danger-soft); color:var(--danger);}
 
   .note-line{font-size:.75rem; color:var(--ink-faint); margin-top:4px;}
+  /* tasa del dólar bajo el total de ahorros */
+  .fx-line{
+    display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    margin-top:12px; padding-top:10px; border-top:1px dashed var(--line);
+    font-size:.75rem; color:var(--ink-soft);
+  }
+  .fx-src{color:var(--ink-faint);}
 
   .linkbtn{
     background:none; border:none; padding:0; margin-top:8px;
@@ -573,12 +582,19 @@
       categories: seedCategories(),
       expenses: [], savings: [], interest: [],
       goals: [], holdings: [],
+      fx: defaultFx(),
       createdAt: Date.now()
     };
     DB.active = id;
     saveDB();
     return id;
   }
+
+  // Tasa de cambio del dólar. Todo el dinero se muestra en la moneda del
+  // perfil (pesos); lo que cotiza en dólares se convierte con esta tasa.
+  // "source" dice de dónde salió: referencia inicial, mercado o a mano.
+  var FX_FALLBACK = 4000;
+  function defaultFx(){ return { usd: FX_FALLBACK, updatedAt: null, source: "default" }; }
 
   // Los perfiles creados antes de esta versión no traen metas ni tipos de ahorro.
   function normalizeProfile(p){
@@ -589,7 +605,26 @@
     if(!Array.isArray(p.interest)) p.interest = [];
     if(!Array.isArray(p.expenses)) p.expenses = [];
     if(!Array.isArray(p.categories)) p.categories = [];
+    p.fx = normalizeFx(p.fx);
+    // Acciones guardadas antes de esta versión: el precio que trajo el mercado
+    // venía en la moneda de la bolsa, así que esa es su moneda real. Las que
+    // el usuario escribió a mano se quedan en la moneda del perfil.
+    p.holdings.forEach(function(h){
+      if(h && h.kind === "accion" && h.currency == null){
+        h.currency = (h.quoteCurrency === "USD") ? "USD" : "LOCAL";
+      }
+    });
     return p;
+  }
+  function normalizeFx(fx){
+    var base = defaultFx();
+    if(!fx || typeof fx !== "object") return base;
+    var usd = Number(fx.usd);
+    return {
+      usd: (isFinite(usd) && usd > 0) ? usd : base.usd,
+      updatedAt: fx.updatedAt || null,
+      source: (fx.source === "market" || fx.source === "manual") ? fx.source : "default"
+    };
   }
   function activeProfile(){ return normalizeProfile(DB.profiles[DB.active]); }
 
@@ -615,6 +650,19 @@
     var v = Number(n) || 0;
     if(Math.abs(v) < 1000 && Math.round(v) !== v) return fmtDec(p, v, 2);
     return fmt(p, v);
+  }
+  // Cifras en dólares: se ven con centavos y con su propio símbolo, para que
+  // no se confundan con los pesos del resto de la app.
+  function fmtUsd(n, dec){
+    var v = Number(n) || 0;
+    var neg = v < 0;
+    var d = dec == null ? 2 : dec;
+    var s = Math.abs(v).toLocaleString("es-CO", {minimumFractionDigits:d, maximumFractionDigits:d});
+    return (neg ? "-" : "") + "US$" + s;
+  }
+  // Muestra una cifra en la moneda en la que está: dólares o la del perfil.
+  function fmtIn(p, n, cur, dec){
+    return cur === "USD" ? fmtUsd(n, dec) : fmtDec(p, n, dec);
   }
   // Porcentajes con coma decimal, como el resto de la app.
   function fmtPct(n, dec){
@@ -651,26 +699,50 @@
     return term > 0 ? Math.min(elapsed, term) : elapsed;
   }
 
-  function holdingValue(h){
+  // Moneda en la que está guardado un tipo de ahorro. Solo las acciones pueden
+  // estar en dólares; las cuentas y los CDT siempre van en la del perfil.
+  function holdingCurrency(h){
+    return (h && h.kind === "accion" && h.currency === "USD") ? "USD" : "LOCAL";
+  }
+  function usdRate(p){
+    var r = Number(p && p.fx && p.fx.usd);
+    return (isFinite(r) && r > 0) ? r : FX_FALLBACK;
+  }
+  // Pasa una cifra a la moneda del perfil. Es la puerta por la que todo lo que
+  // cotiza en dólares entra a los totales en pesos.
+  function toLocal(p, n, cur){
+    var v = Number(n) || 0;
+    return cur === "USD" ? v * usdRate(p) : v;
+  }
+  function hasUsdHoldings(p){
+    return p.holdings.some(function(h){ return holdingCurrency(h) === "USD"; });
+  }
+
+  // Valor en la moneda en la que está guardado el tipo de ahorro.
+  function holdingValueNative(h){
     if(!h) return 0;
     if(h.kind === "cuenta") return Number(h.amount) || 0;
     if(h.kind === "cdt") return cdtValueAt(h, cdtElapsedDays(h));
     if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.price) || 0);
     return 0;
   }
-  // Lo que pusiste de tu bolsillo, sin rendimientos
-  function holdingCost(h){
+  // Lo que pusiste de tu bolsillo, sin rendimientos, en su propia moneda.
+  function holdingCostNative(h){
     if(!h) return 0;
     if(h.kind === "cuenta") return Number(h.amount) || 0;
     if(h.kind === "cdt") return Number(h.principal) || 0;
     if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.buyPrice) || Number(h.price) || 0);
     return 0;
   }
+  // Las dos de arriba, ya convertidas a la moneda del perfil: así los totales,
+  // la dona y las metas hablan todos en pesos.
+  function holdingValue(h, p){ return toLocal(p, holdingValueNative(h), holdingCurrency(h)); }
+  function holdingCost(h, p){ return toLocal(p, holdingCostNative(h), holdingCurrency(h)); }
   function totalHoldings(p){
-    return p.holdings.reduce(function(s,h){ return s + holdingValue(h); }, 0);
+    return p.holdings.reduce(function(s,h){ return s + holdingValue(h, p); }, 0);
   }
   function totalHoldingsCost(p){
-    return p.holdings.reduce(function(s,h){ return s + holdingCost(h); }, 0);
+    return p.holdings.reduce(function(s,h){ return s + holdingCost(h, p); }, 0);
   }
   function getCategory(p, id){
     for(var i=0;i<p.categories.length;i++){ if(p.categories[i].id === id) return p.categories[i]; }
@@ -984,6 +1056,7 @@
         interest: Array.isArray(pr.interest) ? pr.interest : [],
         goals: Array.isArray(pr.goals) ? pr.goals : [],
         holdings: Array.isArray(pr.holdings) ? pr.holdings : [],
+        fx: normalizeFx(pr.fx),
         createdAt: pr.createdAt || Date.now()
       };
       count++;
@@ -1430,6 +1503,18 @@
     '</div>';
   }
 
+  // Línea que explica con qué dólar se hicieron las cuentas y deja cambiarlo.
+  function fxLine(p){
+    var fx = p.fx || defaultFx();
+    var origen = fx.source === "market" ? ("mercado, " + esc(fx.updatedAt || ""))
+               : fx.source === "manual" ? "puesto por ti"
+               : "valor de referencia";
+    return '<div class="fx-line">' +
+      '<span>Todo en ' + esc(p.currency) + ' · dólar a <b class="tnum">' + fmt(p, usdRate(p)) + '</b> <span class="fx-src">(' + origen + ')</span></span>' +
+      '<button class="linkbtn" data-action="edit-fx">Cambiar</button>' +
+    '</div>';
+  }
+
   function viewAhorros(p){
     var totalSavings = p.savings.reduce(function(s,x){ return s+Number(x.amount); }, 0);
     var totalInterest = p.interest.reduce(function(s,x){ return s+Number(x.amount); }, 0);
@@ -1461,7 +1546,7 @@
 
     var slices = p.holdings.map(function(h, i){
       return { label: h.name || KIND_LABEL[h.kind] || "Sin nombre",
-               value: holdingValue(h),
+               value: holdingValue(h, p),
                color: catColor(h.colorIdx != null ? h.colorIdx : i) };
     }).filter(function(s){ return s.value > 0; });
 
@@ -1490,7 +1575,9 @@
     // ----- lista de tipos de ahorro -----
     var tiposHtml = p.holdings.map(function(h, i){
       var color = catColor(h.colorIdx != null ? h.colorIdx : i);
-      var valor = holdingValue(h);
+      var cur = holdingCurrency(h);
+      var valorNativo = holdingValueNative(h);
+      var valor = toLocal(p, valorNativo, cur);
       var detalle = "";
 
       if(h.kind === "cdt"){
@@ -1512,20 +1599,25 @@
         var shares = Number(h.shares) || 0;
         var price = Number(h.price) || 0;
         var buy = Number(h.buyPrice) || 0;
-        var costo = shares * buy;
-        var dif = valor - costo;
-        var difPct = costo > 0 ? (dif / costo) * 100 : 0;
+        // La ganancia se calcula en la moneda de la acción y después se pasa a
+        // pesos: así el porcentaje es el de la bolsa, sin ruido de la tasa.
+        var costoNativo = shares * buy;
+        var difNativa = valorNativo - costoNativo;
+        var difPct = costoNativo > 0 ? (difNativa / costoNativo) * 100 : 0;
+        var dif = toLocal(p, difNativa, cur);
         detalle =
           '<div class="hold-grid">' +
             '<div><span class="hold-k">Cantidad</span><span class="hold-v tnum">' + shares.toLocaleString("es-CO", {maximumFractionDigits:4}) + '</span></div>' +
-            '<div><span class="hold-k">Precio actual</span><span class="hold-v tnum">' + fmtDec(p, price, 2) + '</span></div>' +
-            '<div><span class="hold-k">Precio compra</span><span class="hold-v tnum">' + (buy ? fmtDec(p, buy, 2) : "—") + '</span></div>' +
-            '<div><span class="hold-k">Ganancia</span><span class="hold-v tnum ' + (dif >= 0 ? "pos" : "neg") + '">' + (dif >= 0 ? "+" : "") + fmtSmart(p, dif) + (costo > 0 ? " (" + (dif>=0?"+":"") + fmtPct(difPct) + "%)" : "") + '</span></div>' +
+            '<div><span class="hold-k">Precio actual</span><span class="hold-v tnum">' + fmtIn(p, price, cur, 2) + '</span></div>' +
+            '<div><span class="hold-k">Precio compra</span><span class="hold-v tnum">' + (buy ? fmtIn(p, buy, cur, 2) : "—") + '</span></div>' +
+            '<div><span class="hold-k">Ganancia</span><span class="hold-v tnum ' + (dif >= 0 ? "pos" : "neg") + '">' + (dif >= 0 ? "+" : "") + fmtSmart(p, dif) + (costoNativo > 0 ? " (" + (dif>=0?"+":"") + fmtPct(difPct) + "%)" : "") + '</span></div>' +
           '</div>' +
           '<div class="hold-foot">' +
             (h.ticker ? 'Símbolo <b>' + esc(h.ticker.toUpperCase()) + '</b> · ' : '') +
             (h.updatedAt ? 'precio actualizado ' + esc(h.updatedAt) : 'precio puesto por ti') +
-            (h.quoteCurrency ? ' · cotiza en <b>' + esc(h.quoteCurrency) + '</b>' : '') +
+            (cur === "USD"
+              ? ' · cotiza en <b>dólares</b>, convertido a ' + fmt(p, usdRate(p)) + ' por dólar'
+              : '') +
           '</div>';
       } else {
         detalle = '<div class="hold-foot">Saldo que tienes guardado en este lugar.</div>';
@@ -1541,7 +1633,9 @@
             '</div>' +
           '</div>' +
           '<div class="row" style="gap:4px;">' +
-            '<span class="hold-total tnum">' + fmtSmart(p, valor) + '</span>' +
+            '<span class="hold-total tnum">' + fmtSmart(p, valor) +
+              (cur === "USD" ? '<span class="hold-native tnum">' + fmtUsd(valorNativo, 2) + '</span>' : '') +
+            '</span>' +
             '<button class="icon-btn" data-edithold="' + h.id + '" title="Editar">✎</button>' +
             '<button class="icon-btn" data-delhold="' + h.id + '" title="Eliminar">✕</button>' +
           '</div>' +
@@ -1551,6 +1645,7 @@
     }).join("");
 
     var hayAcciones = p.holdings.some(function(h){ return h.kind === "accion" && h.ticker; });
+    var hayDolares = hasUsdHoldings(p);
 
     return '<div class="stack">' +
       '<div class="card">' +
@@ -1565,6 +1660,7 @@
               '<span>Aportado: <b class="tnum">' + fmt(p,totalSavings) + '</b></span>' +
               '<span>Intereses: <b class="tnum">' + fmt(p,totalInterest) + '</b></span>' +
             '</div>') +
+        (hayDolares ? fxLine(p) : '') +
       '</div>' +
 
       '<div>' +
@@ -1662,9 +1758,12 @@
   }
 
   // ---------- tipos de ahorro ----------
-  function holdingFormFields(h){
+  function holdingFormFields(h, p){
     h = h || {};
     var kind = h.kind || "cuenta";
+    // Las acciones nuevas arrancan en dólares, que es como cotiza la bolsa.
+    var curAccion = (h.currency === "LOCAL") ? "LOCAL" : "USD";
+    var monedaPerfil = p ? p.currency : "$";
     return '' +
       '<label class="field">Tipo' +
         '<select id="hKind">' +
@@ -1688,11 +1787,17 @@
 
       '<div id="campos-accion" class="stack kind-fields">' +
         '<label class="field">Símbolo en bolsa<input type="text" id="hTicker" maxlength="12" value="' + esc(h.ticker || "") + '" placeholder="Ej. AAPL, MSFT, TSLA" autocapitalize="characters"></label>' +
+        '<label class="field">Moneda de los precios' +
+          '<select id="hCurrency">' +
+            '<option value="USD"' + (curAccion==="USD"?" selected":"") + '>Dólares (US$)</option>' +
+            '<option value="LOCAL"' + (curAccion==="LOCAL"?" selected":"") + '>Moneda del perfil</option>' +
+          '</select>' +
+        '</label>' +
         '<label class="field">Cantidad de acciones<input type="text" id="hShares" inputmode="decimal" value="' + (h.shares != null ? h.shares : "") + '" placeholder="Ej. 2,5"></label>' +
         '<label class="field">Precio de compra (por acción)<input type="text" id="hBuy" inputmode="decimal" value="' + (h.buyPrice != null ? h.buyPrice : "") + '" placeholder="Ej. 250,40"></label>' +
         '<label class="field">Precio actual (por acción)<input type="text" id="hPrice" inputmode="decimal" value="' + (h.price != null ? h.price : "") + '" placeholder="Ej. 305,57"></label>' +
         '<p class="note-line">Si pones el símbolo, el botón “Actualizar precios” trae el precio del mercado por ti. ' +
-        'Ojo: las acciones de EE. UU. cotizan en dólares, así que ese precio llega en dólares — si tu presupuesto está en otra moneda, conviértelo a mano para que el total tenga sentido.</p>' +
+        'Las acciones de EE. UU. cotizan en dólares: déjalas en dólares y Cuadre las suma al total ya convertidas a ' + esc(monedaPerfil) + '.</p>' +
       '</div>';
   }
 
@@ -1714,7 +1819,7 @@
     openSheet(
       '<div class="sheet-head"><h3>' + (editando ? "Editar tipo de ahorro" : "Agregar tipo de ahorro") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
       '<form id="holdForm" class="stack">' +
-        holdingFormFields(existing) +
+        holdingFormFields(existing, p) +
         '<button class="btn block" type="submit">' + (editando ? "Guardar cambios" : "Agregar") + '</button>' +
       '</form>'
     );
@@ -1738,6 +1843,7 @@
         h.termMonths = parseNum(document.getElementById("hTerm").value);
       } else {
         h.ticker = document.getElementById("hTicker").value.trim().toUpperCase();
+        h.currency = document.getElementById("hCurrency").value === "LOCAL" ? "LOCAL" : "USD";
         h.shares = parseNum(document.getElementById("hShares").value);
         h.buyPrice = parseNum(document.getElementById("hBuy").value);
         h.price = parseNum(document.getElementById("hPrice").value);
@@ -1774,6 +1880,15 @@
       });
   }
 
+  // La tasa del dólar sale del mismo servicio: USDCOP=X cotiza cuántos pesos
+  // vale un dólar. Si el perfil usa otra moneda, el usuario la pone a mano.
+  function fetchUsdRate(){
+    return fetchQuote("USDCOP=X").then(function(q){
+      if(!(q.price > 0)) throw new Error("sin tasa");
+      return q.price;
+    });
+  }
+
   function refreshPrices(){
     var p = activeProfile();
     var acciones = p.holdings.filter(function(h){ return h.kind === "accion" && h.ticker; });
@@ -1785,11 +1900,19 @@
     var listos = 0, fallidos = [];
     var hoy = new Intl.DateTimeFormat("es", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}).format(new Date());
 
-    Promise.all(acciones.map(function(h){
+    var tareas = acciones.map(function(h){
       return fetchQuote(h.ticker)
         .then(function(q){ h.price = q.price; h.quoteCurrency = q.currency; h.updatedAt = hoy; listos++; })
         .catch(function(){ fallidos.push(h.ticker); });
-    })).then(function(){
+    });
+    // De paso se refresca el dólar, para que el total en pesos quede al día.
+    if(hasUsdHoldings(p)){
+      tareas.push(fetchUsdRate()
+        .then(function(r){ p.fx = { usd: r, updatedAt: hoy, source: "market" }; })
+        .catch(function(){ /* se queda la tasa que ya había */ }));
+    }
+
+    Promise.all(tareas).then(function(){
       saveDB();
       renderView();
       if(listos && !fallidos.length){
@@ -1802,6 +1925,50 @@
           "Dentro del visor de Claude esta consulta está bloqueada: funciona al abrir la app desde tu archivo o desde tu sitio publicado. " +
           "Mientras tanto puedes escribir el precio a mano editando la acción.");
       }
+    });
+  }
+
+  // ---------- tasa del dólar ----------
+  function openFxSheet(){
+    var p = activeProfile();
+    var fx = p.fx || defaultFx();
+    openSheet(
+      '<div class="sheet-head"><h3>Valor del dólar</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="fxForm" class="stack">' +
+        '<label class="field">¿Cuántos ' + esc(p.currency) + ' vale un dólar?' +
+          '<input type="text" id="fxRate" inputmode="decimal" value="' + esc(String(fx.usd)) + '" placeholder="Ej. 4.050">' +
+        '</label>' +
+        '<button class="btn block" type="submit">Guardar</button>' +
+        '<button class="btn secondary block" type="button" id="fxFetch">Traer la tasa de hoy</button>' +
+      '</form>' +
+      '<p class="note-line">Con esta tasa Cuadre convierte a ' + esc(p.currency) + ' lo que tengas en dólares, para que el total de tus ahorros esté todo en una sola moneda. ' +
+      'La tasa que trae el botón es la del mercado (USD/COP); si tu perfil usa otra moneda, escríbela tú.</p>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("fxForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var r = parseNum(document.getElementById("fxRate").value);
+      if(!(r > 0)){ showToast("Escribe un valor mayor que cero."); return; }
+      p.fx = { usd: r, updatedAt: null, source: "manual" };
+      saveDB();
+      closeSheet();
+      renderView();
+      showToast("Dólar a " + fmt(p, r) + ".");
+    });
+    document.getElementById("fxFetch").addEventListener("click", function(){
+      showToast("Consultando el dólar…");
+      var hoy = new Intl.DateTimeFormat("es", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}).format(new Date());
+      fetchUsdRate().then(function(r){
+        p.fx = { usd: r, updatedAt: hoy, source: "market" };
+        saveDB();
+        closeSheet();
+        renderView();
+        showToast("Dólar a " + fmt(p, r) + ".");
+      }).catch(function(){
+        showMessageSheet("No se pudo traer la tasa",
+          "Revisa tu conexión. Dentro del visor de Claude esta consulta está bloqueada: funciona al abrir la app desde tu archivo o desde tu sitio publicado. " +
+          "Mientras tanto puedes escribir el valor del dólar a mano.");
+      });
     });
   }
 
@@ -1843,6 +2010,7 @@
         else if(a === "add-goal") openAddGoal();
         else if(a === "add-holding") openHoldingSheet(null);
         else if(a === "refresh-prices") refreshPrices();
+        else if(a === "edit-fx") openFxSheet();
         return;
       }
 
