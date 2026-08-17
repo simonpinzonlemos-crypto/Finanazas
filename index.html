@@ -475,6 +475,46 @@
     });
   }
 
+  // Lee números escritos como la gente los escribe aquí: acepta coma o punto
+  // como decimal y puntos de miles. "305,57" y "305.57" -> 305.57;
+  // "45.000" -> 45000; "1.234,56" -> 1234.56.
+  function parseNum(raw){
+    if(raw == null) return 0;
+    var s = String(raw).trim();
+    if(!s) return 0;
+    var negativo = /^-/.test(s);
+    s = s.replace(/[^\d.,]/g, "");
+    if(!s) return 0;
+
+    var ultimoPunto = s.lastIndexOf(".");
+    var ultimaComa = s.lastIndexOf(",");
+    var corte = Math.max(ultimoPunto, ultimaComa);
+
+    var entero, decimales = "";
+    if(corte === -1){
+      entero = s;
+    } else {
+      var despues = s.slice(corte + 1);
+      var antes = s.slice(0, corte);
+      var otroSeparador = antes.indexOf(corte === ultimoPunto ? "," : ".") !== -1;
+      var soloCeros = /^0*$/.test(antes.replace(/[.,]/g, ""));
+      // Tres dígitos al final, sin otro separador y con parte entera real:
+      // es separador de miles (45.000), no un decimal.
+      var esMiles = despues.length === 3 && !otroSeparador && !soloCeros;
+      if(esMiles){
+        entero = s;
+      } else {
+        entero = antes;
+        decimales = despues;
+      }
+    }
+    entero = entero.replace(/[.,]/g, "");
+    decimales = decimales.replace(/[.,]/g, "");
+    var n = Number((entero || "0") + (decimales ? "." + decimales : ""));
+    if(!isFinite(n)) return 0;
+    return negativo ? -n : n;
+  }
+
   // ---------- almacenamiento ----------
   // Algunos visores (incluido el de Claude) bloquean o vacían el almacenamiento
   // del navegador. Si eso pasa, la app sigue funcionando en memoria durante la
@@ -559,6 +599,28 @@
     v = Math.round(Math.abs(v));
     var s = v.toLocaleString("es-CO");
     return (neg ? "-" : "") + (p ? p.currency : "$") + s;
+  }
+
+  // Igual que fmt, pero conserva los centavos. Se usa en precios por acción y
+  // en cifras pequeñas, donde redondear al peso borraría información.
+  function fmtDec(p, n, dec){
+    var v = Number(n) || 0;
+    var neg = v < 0;
+    var d = dec == null ? 2 : dec;
+    var s = Math.abs(v).toLocaleString("es-CO", {minimumFractionDigits:d, maximumFractionDigits:d});
+    return (neg ? "-" : "") + (p ? p.currency : "$") + s;
+  }
+  // Decide sola: con decimales si la cifra es pequeña y los tiene.
+  function fmtSmart(p, n){
+    var v = Number(n) || 0;
+    if(Math.abs(v) < 1000 && Math.round(v) !== v) return fmtDec(p, v, 2);
+    return fmt(p, v);
+  }
+  // Porcentajes con coma decimal, como el resto de la app.
+  function fmtPct(n, dec){
+    var v = Number(n) || 0;
+    var d = dec == null ? 1 : dec;
+    return (Math.round(v) === v ? String(v) : v.toFixed(d)).replace(".", ",");
   }
 
   function catColor(idx){ return "var(--cat-" + ((idx % CAT_COLORS) + 1) + ")"; }
@@ -1160,7 +1222,7 @@
         '<div class="eyebrow">Presupuesto mensual</div>' +
         '<div class="row" style="align-items:baseline; gap:8px; margin-top:6px;">' +
           '<span style="font-family:var(--font-mono); font-size:1.3rem; color:var(--ink-faint);">' + esc(p.currency) + '</span>' +
-          '<input id="budget-input" type="number" min="0" step="1" inputmode="decimal" value="' + p.budget + '" ' +
+          '<input id="budget-input" type="text" inputmode="decimal" value="' + p.budget + '" placeholder="0" ' +
           'style="flex:1; min-width:0; width:100%; font-family:var(--font-display); font-size:1.8rem; font-weight:600; background:none; border:none; border-bottom:2px solid var(--line); color:var(--ink); padding:2px 0;">' +
         '</div>' +
         '<p class="note-line">Cuánto ingresa (o dispones) cada mes.</p>' +
@@ -1263,7 +1325,7 @@
       '<form id="expForm" class="stack">' +
         '<label class="field">Fecha<input type="date" id="expDate" value="' + todayStr() + '" required></label>' +
         '<label class="field">Categoría<select id="expCat" required>' + categoryOptions(p) + '</select></label>' +
-        '<label class="field">Monto<input type="number" id="expAmount" min="0" step="0.01" inputmode="decimal" placeholder="0" required></label>' +
+        '<label class="field">Monto<input type="text" id="expAmount" inputmode="decimal" placeholder="Ej. 45.000" required></label>' +
         '<label class="field">Nota (opcional)<input type="text" id="expNote" maxlength="60" placeholder="Ej. Mercado de la semana"></label>' +
         '<button class="btn block" type="submit">Guardar gasto</button>' +
       '</form>'
@@ -1271,8 +1333,11 @@
     document.getElementById("closeSheet").addEventListener("click", closeSheet);
     document.getElementById("expForm").addEventListener("submit", function(e){
       e.preventDefault();
-      var amount = Number(document.getElementById("expAmount").value);
-      if(!amount || amount <= 0) return;
+      var amount = parseNum(document.getElementById("expAmount").value);
+      if(!amount || amount <= 0){
+        showMessageSheet("Falta el monto", "Escribe cuánto gastaste. Puedes usar coma para decimales, por ejemplo 12.500 o 12.500,50.");
+        return;
+      }
       p.expenses.push({
         id: uid(),
         date: document.getElementById("expDate").value || todayStr(),
@@ -1438,7 +1503,7 @@
         detalle =
           '<div class="hold-grid">' +
             '<div><span class="hold-k">Capital</span><span class="hold-v tnum">' + fmt(p, h.principal) + '</span></div>' +
-            '<div><span class="hold-k">Tasa</span><span class="hold-v tnum">' + (Number(h.rate)||0) + '% E.A.</span></div>' +
+            '<div><span class="hold-k">Tasa</span><span class="hold-v tnum">' + fmtPct(Number(h.rate)||0, 2) + '% E.A.</span></div>' +
             '<div><span class="hold-k">Interés a hoy</span><span class="hold-v tnum pos">+' + fmt(p, interesHoy) + '</span></div>' +
             '<div><span class="hold-k">' + (restantes > 0 ? "Faltan" : "Estado") + '</span><span class="hold-v">' + (restantes > 0 ? restantes + " días" : "Vencido") + '</span></div>' +
           '</div>' +
@@ -1452,10 +1517,10 @@
         var difPct = costo > 0 ? (dif / costo) * 100 : 0;
         detalle =
           '<div class="hold-grid">' +
-            '<div><span class="hold-k">Cantidad</span><span class="hold-v tnum">' + shares + '</span></div>' +
-            '<div><span class="hold-k">Precio actual</span><span class="hold-v tnum">' + fmt(p, price) + '</span></div>' +
-            '<div><span class="hold-k">Precio compra</span><span class="hold-v tnum">' + (buy ? fmt(p, buy) : "—") + '</span></div>' +
-            '<div><span class="hold-k">Ganancia</span><span class="hold-v tnum ' + (dif >= 0 ? "pos" : "neg") + '">' + (dif >= 0 ? "+" : "") + fmt(p, dif) + (costo > 0 ? " (" + (dif>=0?"+":"") + difPct.toFixed(1) + "%)" : "") + '</span></div>' +
+            '<div><span class="hold-k">Cantidad</span><span class="hold-v tnum">' + shares.toLocaleString("es-CO", {maximumFractionDigits:4}) + '</span></div>' +
+            '<div><span class="hold-k">Precio actual</span><span class="hold-v tnum">' + fmtDec(p, price, 2) + '</span></div>' +
+            '<div><span class="hold-k">Precio compra</span><span class="hold-v tnum">' + (buy ? fmtDec(p, buy, 2) : "—") + '</span></div>' +
+            '<div><span class="hold-k">Ganancia</span><span class="hold-v tnum ' + (dif >= 0 ? "pos" : "neg") + '">' + (dif >= 0 ? "+" : "") + fmtSmart(p, dif) + (costo > 0 ? " (" + (dif>=0?"+":"") + fmtPct(difPct) + "%)" : "") + '</span></div>' +
           '</div>' +
           '<div class="hold-foot">' +
             (h.ticker ? 'Símbolo <b>' + esc(h.ticker.toUpperCase()) + '</b> · ' : '') +
@@ -1476,7 +1541,7 @@
             '</div>' +
           '</div>' +
           '<div class="row" style="gap:4px;">' +
-            '<span class="hold-total tnum">' + fmt(p, valor) + '</span>' +
+            '<span class="hold-total tnum">' + fmtSmart(p, valor) + '</span>' +
             '<button class="icon-btn" data-edithold="' + h.id + '" title="Editar">✎</button>' +
             '<button class="icon-btn" data-delhold="' + h.id + '" title="Eliminar">✕</button>' +
           '</div>' +
@@ -1544,7 +1609,7 @@
       '<div class="sheet-head"><h3>' + (isSaving ? "Registrar ahorro" : "Registrar interés") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
       '<form id="moneyForm" class="stack">' +
         '<label class="field">Fecha<input type="date" id="mDate" value="' + todayStr() + '" required></label>' +
-        '<label class="field">Monto<input type="number" id="mAmount" min="0" step="0.01" inputmode="decimal" placeholder="0" required></label>' +
+        '<label class="field">Monto<input type="text" id="mAmount" inputmode="decimal" placeholder="Ej. 200.000" required></label>' +
         '<label class="field">Nota (opcional)<input type="text" id="mNote" maxlength="60" placeholder="' + (isSaving ? "Ej. Traslado a cuenta de ahorros" : "Ej. Rendimiento CDT") + '"></label>' +
         '<button class="btn block" type="submit">Guardar</button>' +
       '</form>'
@@ -1552,8 +1617,11 @@
     document.getElementById("closeSheet").addEventListener("click", closeSheet);
     document.getElementById("moneyForm").addEventListener("submit", function(e){
       e.preventDefault();
-      var amount = Number(document.getElementById("mAmount").value);
-      if(!amount || amount <= 0) return;
+      var amount = parseNum(document.getElementById("mAmount").value);
+      if(!amount || amount <= 0){
+        showMessageSheet("Falta el monto", "Escribe el valor. Puedes usar coma para decimales, por ejemplo 200.000 o 200.000,75.");
+        return;
+      }
       var entry = { id: uid(), date: document.getElementById("mDate").value || todayStr(), amount: amount, note: document.getElementById("mNote").value.trim() };
       (isSaving ? p.savings : p.interest).push(entry);
       saveDB();
@@ -1570,7 +1638,7 @@
       '<div class="sheet-head"><h3>Nueva meta de ahorro</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
       '<form id="goalForm" class="stack">' +
         '<label class="field">¿Para qué ahorras?<input type="text" id="goalName" maxlength="40" placeholder="Ej. Viaje, fondo de emergencia" required></label>' +
-        '<label class="field">¿Cuánto quieres reunir?<input type="number" id="goalTarget" min="1" step="0.01" inputmode="decimal" placeholder="0" required></label>' +
+        '<label class="field">¿Cuánto quieres reunir?<input type="text" id="goalTarget" inputmode="decimal" placeholder="Ej. 12.000.000" required></label>' +
         '<button class="btn block" type="submit">Crear meta</button>' +
       '</form>'
     );
@@ -1578,8 +1646,12 @@
     document.getElementById("goalForm").addEventListener("submit", function(e){
       e.preventDefault();
       var name = document.getElementById("goalName").value.trim();
-      var target = Number(document.getElementById("goalTarget").value);
-      if(!name || !target || target <= 0) return;
+      var target = parseNum(document.getElementById("goalTarget").value);
+      if(!name) return;
+      if(!target || target <= 0){
+        showMessageSheet("Falta el monto de la meta", "Escribe cuánto quieres reunir, por ejemplo 12.000.000.");
+        return;
+      }
       p.goals.push({ id: uid(), name: name, target: target, createdAt: Date.now() });
       saveDB();
       closeSheet();
@@ -1604,21 +1676,21 @@
       '<label class="field">Nombre<input type="text" id="hName" maxlength="30" value="' + esc(h.name || "") + '" placeholder="Ej. Bancolombia, CDT 6 meses, Apple" required></label>' +
 
       '<div id="campos-cuenta" class="stack kind-fields">' +
-        '<label class="field">Saldo actual<input type="number" id="hAmount" min="0" step="0.01" inputmode="decimal" value="' + (h.amount != null ? h.amount : "") + '" placeholder="0"></label>' +
+        '<label class="field">Saldo actual<input type="text" id="hAmount" inputmode="decimal" value="' + (h.amount != null ? h.amount : "") + '" placeholder="0"></label>' +
       '</div>' +
 
       '<div id="campos-cdt" class="stack kind-fields">' +
-        '<label class="field">Capital invertido<input type="number" id="hPrincipal" min="0" step="0.01" inputmode="decimal" value="' + (h.principal != null ? h.principal : "") + '" placeholder="0"></label>' +
-        '<label class="field">Tasa de interés anual (E.A. %)<input type="number" id="hRate" min="0" step="0.01" inputmode="decimal" value="' + (h.rate != null ? h.rate : "") + '" placeholder="Ej. 11.5"></label>' +
+        '<label class="field">Capital invertido<input type="text" id="hPrincipal" inputmode="decimal" value="' + (h.principal != null ? h.principal : "") + '" placeholder="0"></label>' +
+        '<label class="field">Tasa de interés anual (E.A. %)<input type="text" id="hRate" inputmode="decimal" value="' + (h.rate != null ? h.rate : "") + '" placeholder="Ej. 11,5"></label>' +
         '<label class="field">Fecha de apertura<input type="date" id="hStart" value="' + esc(h.startDate || todayStr()) + '"></label>' +
         '<label class="field">Plazo en meses<input type="number" id="hTerm" min="1" step="1" inputmode="numeric" value="' + (h.termMonths != null ? h.termMonths : "") + '" placeholder="Ej. 12"></label>' +
       '</div>' +
 
       '<div id="campos-accion" class="stack kind-fields">' +
         '<label class="field">Símbolo en bolsa<input type="text" id="hTicker" maxlength="12" value="' + esc(h.ticker || "") + '" placeholder="Ej. AAPL, MSFT, TSLA" autocapitalize="characters"></label>' +
-        '<label class="field">Cantidad de acciones<input type="number" id="hShares" min="0" step="0.0001" inputmode="decimal" value="' + (h.shares != null ? h.shares : "") + '" placeholder="0"></label>' +
-        '<label class="field">Precio de compra (por acción)<input type="number" id="hBuy" min="0" step="0.01" inputmode="decimal" value="' + (h.buyPrice != null ? h.buyPrice : "") + '" placeholder="0"></label>' +
-        '<label class="field">Precio actual (por acción)<input type="number" id="hPrice" min="0" step="0.01" inputmode="decimal" value="' + (h.price != null ? h.price : "") + '" placeholder="0"></label>' +
+        '<label class="field">Cantidad de acciones<input type="text" id="hShares" inputmode="decimal" value="' + (h.shares != null ? h.shares : "") + '" placeholder="Ej. 2,5"></label>' +
+        '<label class="field">Precio de compra (por acción)<input type="text" id="hBuy" inputmode="decimal" value="' + (h.buyPrice != null ? h.buyPrice : "") + '" placeholder="Ej. 250,40"></label>' +
+        '<label class="field">Precio actual (por acción)<input type="text" id="hPrice" inputmode="decimal" value="' + (h.price != null ? h.price : "") + '" placeholder="Ej. 305,57"></label>' +
         '<p class="note-line">Si pones el símbolo, el botón “Actualizar precios” trae el precio del mercado por ti. ' +
         'Ojo: las acciones de EE. UU. cotizan en dólares, así que ese precio llega en dólares — si tu presupuesto está en otra moneda, conviértelo a mano para que el total tenga sentido.</p>' +
       '</div>';
@@ -1658,17 +1730,17 @@
       h.name = name;
 
       if(kind === "cuenta"){
-        h.amount = Number(document.getElementById("hAmount").value) || 0;
+        h.amount = parseNum(document.getElementById("hAmount").value);
       } else if(kind === "cdt"){
-        h.principal = Number(document.getElementById("hPrincipal").value) || 0;
-        h.rate = Number(document.getElementById("hRate").value) || 0;
+        h.principal = parseNum(document.getElementById("hPrincipal").value);
+        h.rate = parseNum(document.getElementById("hRate").value);
         h.startDate = document.getElementById("hStart").value || todayStr();
-        h.termMonths = Number(document.getElementById("hTerm").value) || 0;
+        h.termMonths = parseNum(document.getElementById("hTerm").value);
       } else {
         h.ticker = document.getElementById("hTicker").value.trim().toUpperCase();
-        h.shares = Number(document.getElementById("hShares").value) || 0;
-        h.buyPrice = Number(document.getElementById("hBuy").value) || 0;
-        h.price = Number(document.getElementById("hPrice").value) || 0;
+        h.shares = parseNum(document.getElementById("hShares").value);
+        h.buyPrice = parseNum(document.getElementById("hBuy").value);
+        h.price = parseNum(document.getElementById("hPrice").value);
       }
 
       if(!existing) p.holdings.push(h);
@@ -1862,7 +1934,7 @@
 
     view.oninput = function(e){
       if(e.target.id === "budget-input"){
-        p.budget = Number(e.target.value) || 0;
+        p.budget = parseNum(e.target.value);
         saveDB();
         refreshBudgetComputed(p);
         return;
