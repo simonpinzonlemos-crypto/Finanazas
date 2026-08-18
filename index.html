@@ -383,6 +383,26 @@
     font-size:.75rem; color:var(--ink-soft);
   }
   .kind-fields{gap:12px;}
+  .hold-native{
+    font-size:.72rem; color:var(--ink-faint); font-family:var(--font-mono);
+    white-space:nowrap; margin-top:1px;
+  }
+  .falta-tasa{color:var(--warn);}
+
+  /* ----- tasa de cambio ----- */
+  .fxbar{
+    margin-top:10px; padding:10px 14px;
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  }
+  .fxbar-rows{display:flex; flex-direction:column; gap:4px;}
+  .fxrow{display:flex; align-items:baseline; gap:8px; font-size:.82rem;}
+  .fxpair{font-weight:700;}
+  .fxeq{color:var(--ink-faint);}
+  .fxval{font-family:var(--font-mono); font-weight:600;}
+  .fxbar-foot{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    margin-top:6px; font-size:.72rem; color:var(--ink-faint); flex-wrap:wrap;
+  }
 
   .pill{display:inline-block; padding:2px 9px; border-radius:999px; font-size:.7rem; font-weight:700;}
   .pill.good{background:var(--accent-soft); color:var(--good);}
@@ -567,12 +587,13 @@
   function createProfile(name){
     var id = uid();
     DB.profiles[id] = {
-      id: id, name: name, currency: "$",
+      id: id, name: name, currency: "$", currencyCode: "COP",
       budget: 0,
       catColorSeq: 6,
       categories: seedCategories(),
       expenses: [], savings: [], interest: [],
       goals: [], holdings: [],
+      fxRates: {}, fxUpdatedAt: "",
       createdAt: Date.now()
     };
     DB.active = id;
@@ -583,6 +604,8 @@
   // Los perfiles creados antes de esta versión no traen metas ni tipos de ahorro.
   function normalizeProfile(p){
     if(!p) return p;
+    if(!p.currencyCode) p.currencyCode = "COP";
+    if(!p.fxRates || typeof p.fxRates !== "object") p.fxRates = {};
     if(!Array.isArray(p.goals)) p.goals = [];
     if(!Array.isArray(p.holdings)) p.holdings = [];
     if(!Array.isArray(p.savings)) p.savings = [];
@@ -625,6 +648,25 @@
 
   function catColor(idx){ return "var(--cat-" + ((idx % CAT_COLORS) + 1) + ")"; }
 
+  // ---------- monedas ----------
+  // Una acción puede cotizar en dólares mientras tu presupuesto está en pesos.
+  // Guardamos cuántos pesos vale 1 unidad de cada moneda extranjera.
+  function isForeign(p, code){
+    if(!code) return false;
+    return String(code).toUpperCase() !== String(p.currencyCode || "COP").toUpperCase();
+  }
+  // Devuelve la tasa, o null si es extranjera y todavía no la conocemos.
+  function fxRate(p, code){
+    if(!isForeign(p, code)) return 1;
+    var r = Number(p.fxRates[String(code).toUpperCase()]);
+    return (r > 0) ? r : null;
+  }
+  function fmtNative(code, n, dec){
+    var d = dec == null ? 2 : dec;
+    var v = Number(n) || 0;
+    return v.toLocaleString("es-CO", {minimumFractionDigits:d, maximumFractionDigits:d}) + " " + String(code || "").toUpperCase();
+  }
+
   // ---------- tipos de ahorro ----------
   var KIND_LABEL = { cuenta:"Cuenta / Efectivo", cdt:"CDT", accion:"Acción" };
 
@@ -645,32 +687,67 @@
     return principal * Math.pow(1 + rate, days / 365);
   }
   function cdtTermDays(h){ return Math.round((Number(h.termMonths) || 0) * 30.4375); }
+  function cdtIsOpen(h){ return !!h.openEnded || !(Number(h.termMonths) > 0); }
   function cdtElapsedDays(h){
-    var term = cdtTermDays(h);
     var elapsed = daysBetween(h.startDate);
-    return term > 0 ? Math.min(elapsed, term) : elapsed;
+    if(cdtIsOpen(h)) return elapsed;           // sin plazo: sigue creciendo
+    return Math.min(elapsed, cdtTermDays(h));  // con plazo: se detiene al vencer
   }
+  // ¿El valor lo escribiste tú a mano?
+  function cdtManual(h){ return Number(h.currentValue) > 0; }
 
-  function holdingValue(h){
+  // Valor en la moneda propia del papel (sin convertir)
+  function holdingNativeValue(h){
     if(!h) return 0;
     if(h.kind === "cuenta") return Number(h.amount) || 0;
-    if(h.kind === "cdt") return cdtValueAt(h, cdtElapsedDays(h));
+    if(h.kind === "cdt"){
+      if(cdtManual(h)) return Number(h.currentValue);
+      return cdtValueAt(h, cdtElapsedDays(h));
+    }
     if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.price) || 0);
     return 0;
   }
-  // Lo que pusiste de tu bolsillo, sin rendimientos
-  function holdingCost(h){
+  function holdingNativeCost(h){
     if(!h) return 0;
     if(h.kind === "cuenta") return Number(h.amount) || 0;
     if(h.kind === "cdt") return Number(h.principal) || 0;
     if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.buyPrice) || Number(h.price) || 0);
     return 0;
   }
+  function holdingCurrency(h){
+    return (h && h.kind === "accion" && h.quoteCurrency) ? h.quoteCurrency : "";
+  }
+  // Valor ya convertido a la moneda de tu presupuesto
+  function holdingValue(p, h){
+    var tasa = fxRate(p, holdingCurrency(h));
+    return holdingNativeValue(h) * (tasa == null ? 1 : tasa);
+  }
+  function holdingCost(p, h){
+    var tasa = fxRate(p, holdingCurrency(h));
+    return holdingNativeCost(h) * (tasa == null ? 1 : tasa);
+  }
   function totalHoldings(p){
-    return p.holdings.reduce(function(s,h){ return s + holdingValue(h); }, 0);
+    return p.holdings.reduce(function(s,h){ return s + holdingValue(p, h); }, 0);
   }
   function totalHoldingsCost(p){
-    return p.holdings.reduce(function(s,h){ return s + holdingCost(h); }, 0);
+    return p.holdings.reduce(function(s,h){ return s + holdingCost(p, h); }, 0);
+  }
+  // Monedas extranjeras en uso a las que todavía les falta tasa
+  function missingRates(p){
+    var faltan = {};
+    p.holdings.forEach(function(h){
+      var c = holdingCurrency(h);
+      if(c && isForeign(p, c) && fxRate(p, c) == null) faltan[c.toUpperCase()] = true;
+    });
+    return Object.keys(faltan);
+  }
+  function usedForeignCurrencies(p){
+    var set = {};
+    p.holdings.forEach(function(h){
+      var c = holdingCurrency(h);
+      if(c && isForeign(p, c)) set[c.toUpperCase()] = true;
+    });
+    return Object.keys(set);
   }
   function getCategory(p, id){
     for(var i=0;i<p.categories.length;i++){ if(p.categories[i].id === id) return p.categories[i]; }
@@ -848,6 +925,7 @@
       '<form id="profSettingsForm" class="stack">' +
         '<label class="field">Nombre<input type="text" id="setName" value="' + esc(p.name) + '" maxlength="24"></label>' +
         '<label class="field">Símbolo de moneda<input type="text" id="setCurrency" value="' + esc(p.currency) + '" maxlength="4"></label>' +
+        '<label class="field">Código de tu moneda<input type="text" id="setCurrencyCode" value="' + esc(p.currencyCode || "COP") + '" maxlength="3" autocapitalize="characters" placeholder="COP"></label>' +
         '<button class="btn secondary block" type="submit">Guardar cambios</button>' +
       '</form>' +
       '<p class="note-line">Cada perfil guarda su propio presupuesto, gastos y ahorros. Los datos viven solo en este navegador: si abres Cuadre en otro celular o navegador, empezará vacío ahí. Puedes respaldarlos desde Resumen → Respaldo de datos.</p>'
@@ -893,7 +971,12 @@
       e.preventDefault();
       var name = document.getElementById("setName").value.trim();
       var cur = document.getElementById("setCurrency").value.trim();
-      if(name) p.currency = cur || "$", p.name = name;
+      var code = document.getElementById("setCurrencyCode").value.trim().toUpperCase();
+      if(name){
+        p.name = name;
+        p.currency = cur || "$";
+        p.currencyCode = code || "COP";
+      }
       saveDB();
       closeSheet();
       renderApp();
@@ -976,6 +1059,9 @@
         id: id,
         name: String(pr.name),
         currency: pr.currency || "$",
+        currencyCode: pr.currencyCode || "COP",
+        fxRates: (pr.fxRates && typeof pr.fxRates === "object") ? pr.fxRates : {},
+        fxUpdatedAt: pr.fxUpdatedAt || "",
         budget: Number(pr.budget) || 0,
         catColorSeq: Number(pr.catColorSeq) || 0,
         categories: Array.isArray(pr.categories) ? pr.categories : [],
@@ -1461,7 +1547,7 @@
 
     var slices = p.holdings.map(function(h, i){
       return { label: h.name || KIND_LABEL[h.kind] || "Sin nombre",
-               value: holdingValue(h),
+               value: holdingValue(p, h),
                color: catColor(h.colorIdx != null ? h.colorIdx : i) };
     }).filter(function(s){ return s.value > 0; });
 
@@ -1490,42 +1576,66 @@
     // ----- lista de tipos de ahorro -----
     var tiposHtml = p.holdings.map(function(h, i){
       var color = catColor(h.colorIdx != null ? h.colorIdx : i);
-      var valor = holdingValue(h);
+      var moneda = holdingCurrency(h);
+      var extranjera = moneda && isForeign(p, moneda);
+      var tasa = fxRate(p, moneda);
+      var nativo = holdingNativeValue(h);
+      var valor = holdingValue(p, h);
       var detalle = "";
 
       if(h.kind === "cdt"){
-        var termDays = cdtTermDays(h);
+        var abierto = cdtIsOpen(h);
+        var manual = cdtManual(h);
         var elapsed = cdtElapsedDays(h);
-        var restantes = Math.max(0, termDays - elapsed);
         var interesHoy = valor - (Number(h.principal) || 0);
-        var alVencer = cdtValueAt(h, termDays);
-        var gananciaTotal = alVencer - (Number(h.principal) || 0);
+        var filaDerecha = manual
+          ? '<div><span class="hold-k">Valor</span><span class="hold-v">Puesto por ti</span></div>'
+          : (abierto
+              ? '<div><span class="hold-k">Lleva</span><span class="hold-v">' + elapsed + ' días</span></div>'
+              : '<div><span class="hold-k">' + (Math.max(0, cdtTermDays(h) - elapsed) > 0 ? "Faltan" : "Estado") + '</span><span class="hold-v">' + (Math.max(0, cdtTermDays(h) - elapsed) > 0 ? Math.max(0, cdtTermDays(h) - elapsed) + " días" : "Vencido") + '</span></div>');
+
         detalle =
           '<div class="hold-grid">' +
             '<div><span class="hold-k">Capital</span><span class="hold-v tnum">' + fmt(p, h.principal) + '</span></div>' +
-            '<div><span class="hold-k">Tasa</span><span class="hold-v tnum">' + fmtPct(Number(h.rate)||0, 2) + '% E.A.</span></div>' +
-            '<div><span class="hold-k">Interés a hoy</span><span class="hold-v tnum pos">+' + fmt(p, interesHoy) + '</span></div>' +
-            '<div><span class="hold-k">' + (restantes > 0 ? "Faltan" : "Estado") + '</span><span class="hold-v">' + (restantes > 0 ? restantes + " días" : "Vencido") + '</span></div>' +
+            '<div><span class="hold-k">Tasa</span><span class="hold-v tnum">' + (Number(h.rate) > 0 ? fmtPct(Number(h.rate), 2) + '% E.A.' : '—') + '</span></div>' +
+            '<div><span class="hold-k">' + (interesHoy >= 0 ? "Ganancia a hoy" : "Diferencia") + '</span><span class="hold-v tnum ' + (interesHoy >= 0 ? "pos" : "neg") + '">' + (interesHoy >= 0 ? "+" : "") + fmt(p, interesHoy) + '</span></div>' +
+            filaDerecha +
           '</div>' +
-          '<div class="hold-foot">Al vencer (' + (Number(h.termMonths)||0) + ' meses): <b class="tnum">' + fmt(p, alVencer) + '</b> · ganas <b class="tnum">' + fmt(p, gananciaTotal) + '</b></div>';
+          '<div class="hold-foot">' +
+            (manual
+              ? 'Valor ajustado por ti. Bórralo al editar para volver al cálculo automático.'
+              : (abierto
+                  ? 'Sin plazo fijo: sigue creciendo mientras esté abierto. Puedes ajustar el valor a mano cuando quieras.'
+                  : 'Al vencer (' + (Number(h.termMonths)||0) + ' meses): <b class="tnum">' + fmt(p, cdtValueAt(h, cdtTermDays(h))) + '</b> · ganas <b class="tnum">' + fmt(p, cdtValueAt(h, cdtTermDays(h)) - (Number(h.principal)||0)) + '</b>')) +
+          '</div>';
       } else if(h.kind === "accion"){
         var shares = Number(h.shares) || 0;
         var price = Number(h.price) || 0;
         var buy = Number(h.buyPrice) || 0;
-        var costo = shares * buy;
-        var dif = valor - costo;
-        var difPct = costo > 0 ? (dif / costo) * 100 : 0;
+        var costoNativo = shares * buy;
+        var difNativo = nativo - costoNativo;
+        var difPct = costoNativo > 0 ? (difNativo / costoNativo) * 100 : 0;
+        var precioTxt = extranjera ? fmtNative(moneda, price) : fmtDec(p, price, 2);
+        var compraTxt = buy ? (extranjera ? fmtNative(moneda, buy) : fmtDec(p, buy, 2)) : "—";
+        var difTxt = extranjera
+          ? (difNativo >= 0 ? "+" : "") + fmtNative(moneda, difNativo)
+          : (difNativo >= 0 ? "+" : "") + fmtSmart(p, difNativo);
+
         detalle =
           '<div class="hold-grid">' +
             '<div><span class="hold-k">Cantidad</span><span class="hold-v tnum">' + shares.toLocaleString("es-CO", {maximumFractionDigits:4}) + '</span></div>' +
-            '<div><span class="hold-k">Precio actual</span><span class="hold-v tnum">' + fmtDec(p, price, 2) + '</span></div>' +
-            '<div><span class="hold-k">Precio compra</span><span class="hold-v tnum">' + (buy ? fmtDec(p, buy, 2) : "—") + '</span></div>' +
-            '<div><span class="hold-k">Ganancia</span><span class="hold-v tnum ' + (dif >= 0 ? "pos" : "neg") + '">' + (dif >= 0 ? "+" : "") + fmtSmart(p, dif) + (costo > 0 ? " (" + (dif>=0?"+":"") + fmtPct(difPct) + "%)" : "") + '</span></div>' +
+            '<div><span class="hold-k">Precio actual</span><span class="hold-v tnum">' + precioTxt + '</span></div>' +
+            '<div><span class="hold-k">Precio compra</span><span class="hold-v tnum">' + compraTxt + '</span></div>' +
+            '<div><span class="hold-k">Ganancia</span><span class="hold-v tnum ' + (difNativo >= 0 ? "pos" : "neg") + '">' + difTxt + (costoNativo > 0 ? " (" + (difNativo>=0?"+":"") + fmtPct(difPct) + "%)" : "") + '</span></div>' +
           '</div>' +
           '<div class="hold-foot">' +
             (h.ticker ? 'Símbolo <b>' + esc(h.ticker.toUpperCase()) + '</b> · ' : '') +
-            (h.updatedAt ? 'precio actualizado ' + esc(h.updatedAt) : 'precio puesto por ti') +
-            (h.quoteCurrency ? ' · cotiza en <b>' + esc(h.quoteCurrency) + '</b>' : '') +
+            (h.updatedAt ? 'actualizado ' + esc(h.updatedAt) : 'precio puesto por ti') +
+            (extranjera
+              ? (tasa != null
+                  ? ' · ' + fmtNative(moneda, nativo) + ' × ' + fmtDec(p, tasa, 2) + ' = <b class="tnum">' + fmt(p, valor) + '</b>'
+                  : ' · <b class="falta-tasa">falta la tasa de ' + esc(moneda) + '</b>')
+              : '') +
           '</div>';
       } else {
         detalle = '<div class="hold-foot">Saldo que tienes guardado en este lugar.</div>';
@@ -1537,11 +1647,14 @@
             '<span class="catdot" style="background:' + color + '"></span>' +
             '<div style="min-width:0;">' +
               '<div class="hold-name">' + esc(h.name || KIND_LABEL[h.kind]) + '</div>' +
-              '<div class="hold-kind">' + esc(KIND_LABEL[h.kind] || "") + '</div>' +
+              '<div class="hold-kind">' + esc(KIND_LABEL[h.kind] || "") + (extranjera ? ' · ' + esc(moneda) : '') + '</div>' +
             '</div>' +
           '</div>' +
           '<div class="row" style="gap:4px;">' +
-            '<span class="hold-total tnum">' + fmtSmart(p, valor) + '</span>' +
+            '<div style="text-align:right;">' +
+              '<div class="hold-total tnum">' + fmtSmart(p, valor) + '</div>' +
+              (extranjera && tasa != null ? '<div class="hold-native tnum">' + fmtNative(moneda, nativo) + '</div>' : '') +
+            '</div>' +
             '<button class="icon-btn" data-edithold="' + h.id + '" title="Editar">✎</button>' +
             '<button class="icon-btn" data-delhold="' + h.id + '" title="Eliminar">✕</button>' +
           '</div>' +
@@ -1549,6 +1662,29 @@
         detalle +
       '</div>';
     }).join("");
+
+    // Barra de tasa de cambio: solo aparece si tienes algo en otra moneda
+    var monedasExt = usedForeignCurrencies(p);
+    var faltantes = missingRates(p);
+    var fxHtml = "";
+    if(monedasExt.length){
+      fxHtml = '<div class="fxbar">' +
+        '<div class="fxbar-rows">' +
+          monedasExt.map(function(c){
+            var r = fxRate(p, c);
+            return '<div class="fxrow">' +
+              '<span class="fxpair">1 ' + esc(c) + '</span>' +
+              '<span class="fxeq">=</span>' +
+              '<span class="fxval tnum">' + (r != null ? fmtDec(p, r, 2) : "sin tasa") + '</span>' +
+            '</div>';
+          }).join("") +
+        '</div>' +
+        '<div class="fxbar-foot">' +
+          '<span>' + (p.fxUpdatedAt ? "Tasa de " + esc(p.fxUpdatedAt) : "Pon la tasa para convertir a tu moneda") + '</span>' +
+          '<button class="linkbtn" data-action="edit-fx" style="margin-top:0;">Cambiar a mano</button>' +
+        '</div>' +
+      '</div>';
+    }
 
     var hayAcciones = p.holdings.some(function(h){ return h.kind === "accion" && h.ticker; });
 
@@ -1574,7 +1710,12 @@
 
       '<div>' +
         '<div class="section-title">Tipos de ahorro</div>' +
+        (faltantes.length ? '<div class="warncard" style="margin-bottom:12px;">' +
+          '<div class="warncard-title">Falta la tasa de ' + faltantes.map(esc).join(", ") + '</div>' +
+          '<p>Mientras no la pongas, ese dinero se está sumando al total sin convertir. Toca “Actualizar precios” o escríbela a mano.</p>' +
+        '</div>' : '') +
         '<div class="card">' + (tiposHtml || '<div class="empty">Agrega una cuenta, un CDT o una acción para ver aquí tu dinero repartido.</div>') + '</div>' +
+        fxHtml +
         '<div class="fab-row">' +
           '<button class="btn block" data-action="add-holding">+ Agregar tipo</button>' +
           (hayAcciones ? '<button class="btn secondary block" data-action="refresh-prices">Actualizar precios</button>' : '') +
@@ -1665,6 +1806,8 @@
   function holdingFormFields(h){
     h = h || {};
     var kind = h.kind || "cuenta";
+    // Un CDT nuevo se asume a plazo fijo; al editar respetamos lo que ya tenga.
+    var abiertoSel = h.id ? cdtIsOpen(h) : false;
     return '' +
       '<label class="field">Tipo' +
         '<select id="hKind">' +
@@ -1683,7 +1826,15 @@
         '<label class="field">Capital invertido<input type="text" id="hPrincipal" inputmode="decimal" value="' + (h.principal != null ? h.principal : "") + '" placeholder="0"></label>' +
         '<label class="field">Tasa de interés anual (E.A. %)<input type="text" id="hRate" inputmode="decimal" value="' + (h.rate != null ? h.rate : "") + '" placeholder="Ej. 11,5"></label>' +
         '<label class="field">Fecha de apertura<input type="date" id="hStart" value="' + esc(h.startDate || todayStr()) + '"></label>' +
-        '<label class="field">Plazo en meses<input type="number" id="hTerm" min="1" step="1" inputmode="numeric" value="' + (h.termMonths != null ? h.termMonths : "") + '" placeholder="Ej. 12"></label>' +
+        '<label class="field">¿Tiene fecha de vencimiento?' +
+          '<select id="hHasTerm">' +
+            '<option value="si"' + (!abiertoSel ? " selected" : "") + '>Sí, a plazo fijo</option>' +
+            '<option value="no"' + (abiertoSel ? " selected" : "") + '>No, abierto (puedo mover el dinero)</option>' +
+          '</select>' +
+        '</label>' +
+        '<label class="field" id="campo-plazo">Plazo en meses<input type="number" id="hTerm" min="1" step="1" inputmode="numeric" value="' + (h.termMonths != null ? h.termMonths : "") + '" placeholder="Ej. 12"></label>' +
+        '<label class="field">Valor actual (opcional)<input type="text" id="hCurrent" inputmode="decimal" value="' + (h.currentValue != null && h.currentValue !== 0 ? h.currentValue : "") + '" placeholder="Déjalo vacío para calcularlo solo"></label>' +
+        '<p class="note-line">Si escribes un valor actual, Cuadre usa ese número tal cual — útil cuando el banco te muestra un saldo distinto. Bórralo para volver al cálculo automático con la tasa.</p>' +
       '</div>' +
 
       '<div id="campos-accion" class="stack kind-fields">' +
@@ -1691,6 +1842,7 @@
         '<label class="field">Cantidad de acciones<input type="text" id="hShares" inputmode="decimal" value="' + (h.shares != null ? h.shares : "") + '" placeholder="Ej. 2,5"></label>' +
         '<label class="field">Precio de compra (por acción)<input type="text" id="hBuy" inputmode="decimal" value="' + (h.buyPrice != null ? h.buyPrice : "") + '" placeholder="Ej. 250,40"></label>' +
         '<label class="field">Precio actual (por acción)<input type="text" id="hPrice" inputmode="decimal" value="' + (h.price != null ? h.price : "") + '" placeholder="Ej. 305,57"></label>' +
+        '<label class="field">Moneda en que cotiza<input type="text" id="hCurrency" maxlength="3" autocapitalize="characters" value="' + esc(h.quoteCurrency || "USD") + '" placeholder="USD"></label>' +
         '<p class="note-line">Si pones el símbolo, el botón “Actualizar precios” trae el precio del mercado por ti. ' +
         'Ojo: las acciones de EE. UU. cotizan en dólares, así que ese precio llega en dólares — si tu presupuesto está en otra moneda, conviértelo a mano para que el total tenga sentido.</p>' +
       '</div>';
@@ -1706,6 +1858,15 @@
     }
     sel.addEventListener("change", pintar);
     pintar();
+
+    // El plazo en meses solo tiene sentido si el CDT tiene vencimiento
+    var hasTerm = document.getElementById("hHasTerm");
+    var campoPlazo = document.getElementById("campo-plazo");
+    function pintarPlazo(){
+      campoPlazo.style.display = (hasTerm.value === "si") ? "flex" : "none";
+    }
+    hasTerm.addEventListener("change", pintarPlazo);
+    pintarPlazo();
   }
 
   function openHoldingSheet(existing){
@@ -1735,12 +1896,15 @@
         h.principal = parseNum(document.getElementById("hPrincipal").value);
         h.rate = parseNum(document.getElementById("hRate").value);
         h.startDate = document.getElementById("hStart").value || todayStr();
-        h.termMonths = parseNum(document.getElementById("hTerm").value);
+        h.openEnded = document.getElementById("hHasTerm").value === "no";
+        h.termMonths = h.openEnded ? 0 : parseNum(document.getElementById("hTerm").value);
+        h.currentValue = parseNum(document.getElementById("hCurrent").value);
       } else {
         h.ticker = document.getElementById("hTicker").value.trim().toUpperCase();
         h.shares = parseNum(document.getElementById("hShares").value);
         h.buyPrice = parseNum(document.getElementById("hBuy").value);
         h.price = parseNum(document.getElementById("hPrice").value);
+        h.quoteCurrency = document.getElementById("hCurrency").value.trim().toUpperCase();
       }
 
       if(!existing) p.holdings.push(h);
@@ -1790,10 +1954,14 @@
         .then(function(q){ h.price = q.price; h.quoteCurrency = q.currency; h.updatedAt = hoy; listos++; })
         .catch(function(){ fallidos.push(h.ticker); });
     })).then(function(){
+      // Con los precios ya puestos sabemos en qué monedas están; ahora las tasas.
+      return refreshRates(p, hoy);
+    }).then(function(tasasOk){
       saveDB();
       renderView();
       if(listos && !fallidos.length){
-        showToast(listos === 1 ? "Precio actualizado." : listos + " precios actualizados.");
+        showToast((listos === 1 ? "Precio actualizado" : listos + " precios actualizados") +
+                  (tasasOk === false ? ", pero no se pudo traer la tasa de cambio." : "."));
       } else if(listos){
         showToast(listos + " actualizados. Sin datos para: " + fallidos.join(", ") + ".");
       } else {
@@ -1802,6 +1970,68 @@
           "Dentro del visor de Claude esta consulta está bloqueada: funciona al abrir la app desde tu archivo o desde tu sitio publicado. " +
           "Mientras tanto puedes escribir el precio a mano editando la acción.");
       }
+    });
+  }
+
+  // Trae cuántos pesos vale cada moneda extranjera que estés usando
+  function refreshRates(p, sello){
+    var monedas = usedForeignCurrencies(p);
+    if(!monedas.length) return Promise.resolve(true);
+    var base = String(p.currencyCode || "COP").toUpperCase();
+    var ok = true;
+    return Promise.all(monedas.map(function(c){
+      return fetchQuote(c + base + "=X")
+        .then(function(q){ p.fxRates[c] = q.price; })
+        .catch(function(){ ok = false; });
+    })).then(function(){
+      if(ok) p.fxUpdatedAt = sello || "";
+      return ok;
+    });
+  }
+
+  function openFxSheet(){
+    var p = activeProfile();
+    var monedas = usedForeignCurrencies(p);
+    if(!monedas.length){
+      showMessageSheet("Sin monedas extranjeras", "Esto aparece cuando tienes acciones que cotizan en otra moneda.");
+      return;
+    }
+    openSheet(
+      '<div class="sheet-head"><h3>Tasa de cambio</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">¿Cuántos ' + esc(p.currencyCode || "COP") + ' vale hoy una unidad de cada moneda? Sirve para sumar todo en tu moneda.</p>' +
+      '<form id="fxForm" class="stack">' +
+        monedas.map(function(c){
+          var r = p.fxRates[c];
+          return '<label class="field">1 ' + esc(c) + ' equivale a<input type="text" inputmode="decimal" data-fx="' + esc(c) + '" value="' + (r != null ? r : "") + '" placeholder="Ej. 4.100"></label>';
+        }).join("") +
+        '<button class="btn block" type="submit">Guardar tasa</button>' +
+        '<button class="btn secondary block" type="button" id="fxAuto">Traerla automáticamente</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("fxForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      Array.prototype.forEach.call(document.querySelectorAll("[data-fx]"), function(inp){
+        var v = parseNum(inp.value);
+        if(v > 0) p.fxRates[inp.dataset.fx] = v;
+      });
+      p.fxUpdatedAt = "hoy, puesta por ti";
+      saveDB();
+      closeSheet();
+      renderView();
+      showToast("Tasa guardada.");
+    });
+    document.getElementById("fxAuto").addEventListener("click", function(){
+      showToast("Consultando la tasa…");
+      var sello = new Intl.DateTimeFormat("es", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}).format(new Date());
+      refreshRates(p, sello).then(function(ok){
+        saveDB();
+        closeSheet();
+        renderView();
+        if(ok) showToast("Tasa actualizada.");
+        else showMessageSheet("No se pudo traer la tasa",
+          "Puede ser la conexión, o que estés dentro del visor de Claude (ahí las consultas a internet están bloqueadas). Escríbela a mano y listo.");
+      });
     });
   }
 
@@ -1843,6 +2073,7 @@
         else if(a === "add-goal") openAddGoal();
         else if(a === "add-holding") openHoldingSheet(null);
         else if(a === "refresh-prices") refreshPrices();
+        else if(a === "edit-fx") openFxSheet();
         return;
       }
 
