@@ -428,6 +428,24 @@
   .pace-k{font-size:.82rem; color:var(--ink-soft); font-weight:600;}
   .pace-v{font-family:var(--font-mono); font-size:.85rem; font-weight:600; white-space:nowrap;}
 
+  .ciclo-tag{
+    display:inline-block; margin-bottom:10px;
+    background:var(--accent-soft); color:var(--accent);
+    padding:3px 10px; border-radius:999px;
+    font-size:.7rem; font-weight:700; letter-spacing:.02em;
+  }
+
+  .corte-row{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    margin-top:14px; padding-top:14px; border-top:1px solid var(--line);
+  }
+  .corte-label{font-size:.85rem; font-weight:600; color:var(--ink-soft);}
+  .corte-row input{
+    width:70px; flex-shrink:0; text-align:center;
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:8px 6px; color:var(--ink); font-weight:700; font-family:var(--font-mono);
+  }
+
   .split-row{
     display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px;
   }
@@ -669,6 +687,7 @@
       id: id, name: name, currency: "$", currencyCode: "COP",
       debts: [],
       budget: 0,
+      cycleStartDay: 1,
       catColorSeq: 6,
       categories: seedCategories(),
       expenses: [], savings: [], interest: [],
@@ -715,6 +734,7 @@
     if(!Array.isArray(p.holdings)) p.holdings = [];
     if(!Array.isArray(p.debts)) p.debts = [];
     if(!p.budgetHistory || typeof p.budgetHistory !== "object") p.budgetHistory = {};
+    if(!(Number(p.cycleStartDay) >= 1)) p.cycleStartDay = 1;
     // Antes se asignaba por porcentaje; ahora se asigna el monto directo.
     // Convertimos una sola vez lo que ya tenías.
     if(Array.isArray(p.categories)){
@@ -1190,6 +1210,7 @@
         holdings: Array.isArray(pr.holdings) ? pr.holdings : [],
         debts: Array.isArray(pr.debts) ? pr.debts : [],
         budgetHistory: (pr.budgetHistory && typeof pr.budgetHistory === "object") ? pr.budgetHistory : {},
+        cycleStartDay: Number(pr.cycleStartDay) >= 1 ? Number(pr.cycleStartDay) : 1,
         createdAt: pr.createdAt || Date.now()
       };
       count++;
@@ -1332,6 +1353,61 @@
   function isoDate(d){
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
   }
+
+  // ---------- ciclo: tu mes puede empezar el día que te pagan ----------
+  function cycleStartDay(p){
+    var d = Math.round(Number(p.cycleStartDay) || 1);
+    return clamp(d, 1, 31);
+  }
+  // Si el día no existe en ese mes (31 en febrero), se usa el último
+  function clampDay(anio, mes, dia){
+    var ultimo = new Date(anio, mes + 1, 0).getDate();
+    return Math.min(dia, ultimo);
+  }
+  function diasEntre(a, b){
+    return Math.round((b - a) / 86400000);
+  }
+  // Periodo en curso: desde el último día de corte hasta la víspera del siguiente
+  function currentCycle(p){
+    var inicio = cycleStartDay(p);
+    var hoy = new Date();
+    var y = hoy.getFullYear(), m = hoy.getMonth();
+    var corteEsteMes = clampDay(y, m, inicio);
+    var desde;
+    if(hoy.getDate() >= corteEsteMes){
+      desde = new Date(y, m, corteEsteMes);
+    } else {
+      var ant = new Date(y, m - 1, 1);
+      desde = new Date(ant.getFullYear(), ant.getMonth(), clampDay(ant.getFullYear(), ant.getMonth(), inicio));
+    }
+    var sig = new Date(desde.getFullYear(), desde.getMonth() + 1, 1);
+    var proximoCorte = new Date(sig.getFullYear(), sig.getMonth(), clampDay(sig.getFullYear(), sig.getMonth(), inicio));
+    var hasta = new Date(proximoCorte.getFullYear(), proximoCorte.getMonth(), proximoCorte.getDate() - 1);
+    var hoyLimpio = new Date(y, m, hoy.getDate());
+    return {
+      desde: isoDate(desde),
+      hasta: isoDate(hasta),
+      dias: diasEntre(desde, hasta) + 1,
+      diaActual: diasEntre(desde, hoyLimpio) + 1,
+      personalizado: inicio !== 1
+    };
+  }
+  function cycleLabel(c){
+    var f = function(iso){
+      var q = iso.split("-");
+      var d = new Date(Number(q[0]), Number(q[1]) - 1, Number(q[2]));
+      return new Intl.DateTimeFormat("es", {day:"numeric", month:"short"}).format(d).replace(".", "");
+    };
+    return f(c.desde) + " – " + f(c.hasta);
+  }
+  function spentByCategoryInRange(p, desde, hasta){
+    var map = {};
+    p.expenses.forEach(function(e){
+      var d = String(e.date);
+      if(d >= desde && d <= hasta) map[e.categoryId] = (map[e.categoryId] || 0) + (Number(e.amount)||0);
+    });
+    return map;
+  }
   // Lunes a domingo de la semana en curso
   function weekRange(){
     var hoy = new Date();
@@ -1348,15 +1424,14 @@
   }
 
   function paceInfo(p){
-    var hoy = new Date();
-    var ym = ymKey(hoy);
+    var ciclo = currentCycle(p);
     var hoyStr = todayStr();
-    var dias = daysInMonthOf(ym);
-    var diaActual = hoy.getDate();
+    var dias = ciclo.dias;
+    var diaActual = ciclo.diaActual;
     var restantes = Math.max(1, dias - diaActual + 1); // hoy cuenta
     var presupuesto = Number(p.budget) || 0;
 
-    var gastadoMes = monthTotalSpent(p, ym);
+    var gastadoMes = spentInRange(p, ciclo.desde, ciclo.hasta);
     var gastadoHoy = spentInRange(p, hoyStr, hoyStr);
     var gastadoAntesDeHoy = gastadoMes - gastadoHoy;
 
@@ -1377,7 +1452,7 @@
     var diferencia = esperado - gastadoMes; // positivo = vas por debajo
 
     return {
-      ym: ym, dias: dias, diaActual: diaActual, restantes: restantes,
+      ciclo: ciclo, dias: dias, diaActual: diaActual, restantes: restantes,
       presupuesto: presupuesto,
       planDiario: planDiario, planSemanal: planSemanal,
       gastadoMes: gastadoMes, gastadoHoy: gastadoHoy,
@@ -1397,6 +1472,7 @@
     var estadoSemana = r.gastadoSemana > r.cupoSemana ? "danger" : (pctSemana >= 85 ? "warn" : "good");
 
     return '<div class="card">' +
+      (r.ciclo.personalizado ? '<div class="ciclo-tag">Periodo ' + cycleLabel(r.ciclo) + '</div>' : '') +
       '<div class="row" style="align-items:flex-start;">' +
         '<div>' +
           '<div class="eyebrow">Puedes gastar hoy</div>' +
@@ -1418,10 +1494,10 @@
       '<div class="pace-sep"></div>' +
 
       '<div class="row">' +
-        '<span class="pace-k">' + (vaBien ? "Llevas ahorrado este mes" : "Vas por encima del plan") + '</span>' +
+        '<span class="pace-k">' + (vaBien ? "Llevas ahorrado este periodo" : "Vas por encima del plan") + '</span>' +
         '<span class="pace-v tnum ' + (vaBien ? "pos" : "neg") + '">' + (vaBien ? "+" : "") + fmt(p, r.diferencia) + '</span>' +
       '</div>' +
-      '<p class="note-line">A día ' + r.diaActual + ' de ' + r.dias + ' tocaría llevar ' + fmt(p, r.esperado) + ' y llevas ' + fmt(p, r.gastadoMes) + '. Quedan ' + r.restantes + (r.restantes === 1 ? ' día' : ' días') + '.</p>' +
+      '<p class="note-line">Día ' + r.diaActual + ' de ' + r.dias + ': tocaría llevar ' + fmt(p, r.esperado) + ' y llevas ' + fmt(p, r.gastadoMes) + '. Quedan ' + r.restantes + (r.restantes === 1 ? ' día' : ' días') + '.</p>' +
     '</div>';
   }
 
@@ -1559,9 +1635,11 @@
 
   function viewResumen(p){
     var thisMonth = ymKey(new Date());
-    var spent = monthTotalSpent(p, thisMonth);
+    // El periodo en curso: el mes calendario, o tu ciclo si lo configuraste
+    var ciclo = currentCycle(p);
+    var spent = spentInRange(p, ciclo.desde, ciclo.hasta);
     var remaining = p.budget - spent;
-    var spentByCat = monthSpentByCategory(p, thisMonth);
+    var spentByCat = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta);
     var overallPct = p.budget > 0 ? clamp((spent / p.budget) * 100, 0, 999) : 0;
     var overallState = overallPct >= 100 ? "danger" : overallPct >= 85 ? "warn" : "good";
 
@@ -1598,11 +1676,11 @@
     return '<div class="stack">' +
       storageWarning() +
       '<div class="card">' +
-        '<div class="eyebrow">' + monthLabel(thisMonth) + '</div>' +
+        '<div class="eyebrow">' + (ciclo.personalizado ? cycleLabel(ciclo) : monthLabel(thisMonth)) + '</div>' +
         '<div class="headline tnum">' + fmt(p, remaining) + '</div>' +
         '<div class="sub">disponible de ' + fmt(p, p.budget) + '</div>' +
         '<div class="progress" style="margin-top:12px; height:10px;"><span style="width:' + Math.min(overallPct,100) + '%; background:' + (overallState==="danger"?"var(--danger)":overallState==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
-        '<div class="row" style="margin-top:8px; font-size:.78rem; color:var(--ink-soft);"><span>Gastado: ' + fmt(p,spent) + '</span><span>' + Math.round(overallPct) + '% del mes</span></div>' +
+        '<div class="row" style="margin-top:8px; font-size:.78rem; color:var(--ink-soft);"><span>Gastado: ' + fmt(p,spent) + '</span><span>' + Math.round(overallPct) + '% ' + (ciclo.personalizado ? "del periodo" : "del mes") + '</span></div>' +
       '</div>' +
       (paceCard(p) ? '<div><div class="section-title">Tu ritmo</div>' + paceCard(p) + '</div>' : '') +
       '<div>' +
@@ -1671,13 +1749,24 @@
           'style="flex:1; min-width:0; width:100%; font-family:var(--font-display); font-size:1.8rem; font-weight:600; background:none; border:none; border-bottom:2px solid var(--line); color:var(--ink); padding:2px 0;">' +
         '</div>' +
         '<p class="note-line">Cuánto ingresa (o dispones) cada mes.</p>' +
+
+        '<div class="corte-row">' +
+          '<label class="corte-label" for="cycle-day">Mi mes empieza el día</label>' +
+          '<input id="cycle-day" type="number" min="1" max="31" step="1" inputmode="numeric" value="' + cycleStartDay(p) + '">' +
+        '</div>' +
+        '<p class="note-line">' +
+          (currentCycle(p).personalizado
+            ? 'Tu periodo va del ' + cycleLabel(currentCycle(p)) + '. Útil si te pagan un día fijo.'
+            : 'Déjalo en 1 si cuentas por mes calendario. Si te pagan el 14, pon 14.') +
+        '</p>' +
+
         (Number(p.budget) > 0 ? (function(){
           var r = paceInfo(p);
           return '<div class="split-row">' +
             '<div class="split-cell"><span class="split-k">Por semana</span><span class="split-v tnum">' + fmt(p, r.planSemanal) + '</span></div>' +
             '<div class="split-cell"><span class="split-k">Por día</span><span class="split-v tnum">' + fmt(p, r.planDiario) + '</span></div>' +
           '</div>' +
-          '<p class="note-line">Tu presupuesto repartido en partes iguales entre los ' + r.dias + ' días de ' + monthLabel(r.ym).toLowerCase().replace(/ de \d+$/, "") + '.</p>';
+          '<p class="note-line">Tu presupuesto repartido en partes iguales entre los ' + r.dias + ' días del periodo.</p>';
         })() : "") +
       '</div>' +
       '<div>' +
@@ -2705,6 +2794,17 @@
     };
 
     view.oninput = function(e){
+      if(e.target.id === "cycle-day"){
+        var dia = Math.round(Number(e.target.value) || 1);
+        p.cycleStartDay = clamp(dia, 1, 31);
+        saveDB();
+        renderView();
+        requestAnimationFrame(function(){
+          var campo = document.getElementById("cycle-day");
+          if(campo){ campo.focus(); campo.select(); }
+        });
+        return;
+      }
       if(e.target.id === "budget-input"){
         p.budget = parseNum(e.target.value);
         rememberBudget(p);
