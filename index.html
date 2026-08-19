@@ -418,6 +418,43 @@
   }
   .falta-tasa{color:var(--warn);}
 
+  /* ----- ritmo diario y semanal ----- */
+  .pace-big{
+    font-family:var(--font-display); font-size:1.75rem; font-weight:600;
+    line-height:1.1; margin-top:2px;
+  }
+  .pace-big.neg{color:var(--danger);}
+  .pace-sep{height:1px; background:var(--line); margin:14px 0 12px;}
+  .pace-k{font-size:.82rem; color:var(--ink-soft); font-weight:600;}
+  .pace-v{font-family:var(--font-mono); font-size:.85rem; font-weight:600; white-space:nowrap;}
+
+  .split-row{
+    display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px;
+  }
+  .split-cell{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:10px 12px; display:flex; flex-direction:column; gap:2px; min-width:0;
+  }
+  .split-k{
+    font-size:.68rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  .split-v{
+    font-family:var(--font-mono); font-size:1rem; font-weight:700;
+    overflow:hidden; text-overflow:ellipsis;
+  }
+
+  .mesrow{
+    display:grid; grid-template-columns:minmax(0,1fr) auto;
+    align-items:center; gap:10px; padding:10px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .mesrow:first-child{padding-top:0;}
+  .mesrow:last-child{border-bottom:none; padding-bottom:0;}
+  .mes-nombre{font-weight:600; font-size:.86rem; text-transform:capitalize; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .mes-sub{font-family:var(--font-mono); font-size:.74rem; color:var(--ink-soft); margin-top:1px;}
+  .mes-est{font-family:var(--font-body); color:var(--ink-faint);}
+
   /* ----- deudas ----- */
   .debt{padding:14px 0; border-bottom:1px solid var(--line);}
   .debt:first-child{padding-top:0;}
@@ -647,8 +684,26 @@
   // Deja todos los perfiles al día y guarda una sola vez, para que la conversión
   // de porcentajes a montos no se repita en cada carga.
   function migrateAll(){
-    Object.keys(DB.profiles).forEach(function(id){ normalizeProfile(DB.profiles[id]); });
+    Object.keys(DB.profiles).forEach(function(id){
+      var p = normalizeProfile(DB.profiles[id]);
+      rememberBudget(p);
+    });
     saveDB();
+  }
+
+  // Guarda el presupuesto del mes en curso, para que el historial no cambie
+  // cuando más adelante ajustes el monto.
+  function rememberBudget(p){
+    if(!p) return;
+    if(!p.budgetHistory) p.budgetHistory = {};
+    var b = Number(p.budget) || 0;
+    if(b > 0) p.budgetHistory[ymKey(new Date())] = b;
+  }
+  // El presupuesto que regía en ese mes (o el actual si no quedó registro)
+  function budgetFor(p, ym){
+    var h = p.budgetHistory && p.budgetHistory[ym];
+    if(h != null && Number(h) > 0) return { valor: Number(h), guardado: true };
+    return { valor: Number(p.budget) || 0, guardado: false };
   }
 
   // Los perfiles creados antes de esta versión no traen metas ni tipos de ahorro.
@@ -659,6 +714,7 @@
     if(!Array.isArray(p.goals)) p.goals = [];
     if(!Array.isArray(p.holdings)) p.holdings = [];
     if(!Array.isArray(p.debts)) p.debts = [];
+    if(!p.budgetHistory || typeof p.budgetHistory !== "object") p.budgetHistory = {};
     // Antes se asignaba por porcentaje; ahora se asigna el monto directo.
     // Convertimos una sola vez lo que ya tenías.
     if(Array.isArray(p.categories)){
@@ -1133,6 +1189,7 @@
         goals: Array.isArray(pr.goals) ? pr.goals : [],
         holdings: Array.isArray(pr.holdings) ? pr.holdings : [],
         debts: Array.isArray(pr.debts) ? pr.debts : [],
+        budgetHistory: (pr.budgetHistory && typeof pr.budgetHistory === "object") ? pr.budgetHistory : {},
         createdAt: pr.createdAt || Date.now()
       };
       count++;
@@ -1265,6 +1322,137 @@
     var b = Number(p.budget) || 0;
     if(b <= 0) return 0;
     return ((Number(c.amount)||0) / b) * 100;
+  }
+
+  // ---------- ritmo: cuánto por día y por semana ----------
+  function daysInMonthOf(ym){
+    var partes = ym.split("-");
+    return new Date(Number(partes[0]), Number(partes[1]), 0).getDate();
+  }
+  function isoDate(d){
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  // Lunes a domingo de la semana en curso
+  function weekRange(){
+    var hoy = new Date();
+    var dow = (hoy.getDay() + 6) % 7; // 0 = lunes
+    var lunes = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - dow);
+    var domingo = new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() + 6);
+    return { desde: isoDate(lunes), hasta: isoDate(domingo), diaSemana: dow + 1 };
+  }
+  function spentInRange(p, desde, hasta){
+    return p.expenses.reduce(function(s,e){
+      var d = String(e.date);
+      return s + ((d >= desde && d <= hasta) ? (Number(e.amount)||0) : 0);
+    }, 0);
+  }
+
+  function paceInfo(p){
+    var hoy = new Date();
+    var ym = ymKey(hoy);
+    var hoyStr = todayStr();
+    var dias = daysInMonthOf(ym);
+    var diaActual = hoy.getDate();
+    var restantes = Math.max(1, dias - diaActual + 1); // hoy cuenta
+    var presupuesto = Number(p.budget) || 0;
+
+    var gastadoMes = monthTotalSpent(p, ym);
+    var gastadoHoy = spentInRange(p, hoyStr, hoyStr);
+    var gastadoAntesDeHoy = gastadoMes - gastadoHoy;
+
+    // Plan puro: repartir el presupuesto en partes iguales
+    var planDiario = presupuesto / dias;
+    var planSemanal = planDiario * 7;
+
+    // Ritmo real: lo que queda, repartido en los días que faltan
+    var cupoHoy = Math.max(0, (presupuesto - gastadoAntesDeHoy)) / restantes;
+    var quedaHoy = cupoHoy - gastadoHoy;
+
+    var semana = weekRange();
+    var gastadoSemana = spentInRange(p, semana.desde, semana.hasta);
+    var cupoSemana = cupoHoy * 7;
+
+    // ¿Vas ahorrando? Comparar con lo que "tocaba" llevar gastado a esta altura
+    var esperado = planDiario * diaActual;
+    var diferencia = esperado - gastadoMes; // positivo = vas por debajo
+
+    return {
+      ym: ym, dias: dias, diaActual: diaActual, restantes: restantes,
+      presupuesto: presupuesto,
+      planDiario: planDiario, planSemanal: planSemanal,
+      gastadoMes: gastadoMes, gastadoHoy: gastadoHoy,
+      cupoHoy: cupoHoy, quedaHoy: quedaHoy,
+      gastadoSemana: gastadoSemana, cupoSemana: cupoSemana,
+      diaSemana: semana.diaSemana,
+      esperado: esperado, diferencia: diferencia
+    };
+  }
+
+  function paceCard(p){
+    var r = paceInfo(p);
+    if(r.presupuesto <= 0) return "";
+
+    var vaBien = r.diferencia >= 0;
+    var pctSemana = r.cupoSemana > 0 ? clamp((r.gastadoSemana / r.cupoSemana) * 100, 0, 100) : 0;
+    var estadoSemana = r.gastadoSemana > r.cupoSemana ? "danger" : (pctSemana >= 85 ? "warn" : "good");
+
+    return '<div class="card">' +
+      '<div class="row" style="align-items:flex-start;">' +
+        '<div>' +
+          '<div class="eyebrow">Puedes gastar hoy</div>' +
+          '<div class="pace-big tnum ' + (r.quedaHoy < 0 ? "neg" : "") + '">' + fmtSmart(p, r.quedaHoy) + '</div>' +
+          '<div class="note-line" style="margin-top:2px;">de ' + fmt(p, r.cupoHoy) + ' · llevas ' + fmt(p, r.gastadoHoy) + '</div>' +
+        '</div>' +
+        '<span class="pill ' + (vaBien ? "good" : "danger") + '">' + (vaBien ? "Ahorrando" : "Por encima") + '</span>' +
+      '</div>' +
+
+      '<div class="pace-sep"></div>' +
+
+      '<div class="row" style="margin-bottom:6px;">' +
+        '<span class="pace-k">Esta semana</span>' +
+        '<span class="pace-v tnum">' + fmt(p, r.gastadoSemana) + ' de ' + fmt(p, r.cupoSemana) + '</span>' +
+      '</div>' +
+      '<div class="progress"><span style="width:' + pctSemana + '%; background:' +
+        (estadoSemana === "danger" ? "var(--danger)" : estadoSemana === "warn" ? "var(--warn)" : "var(--accent)") + '"></span></div>' +
+
+      '<div class="pace-sep"></div>' +
+
+      '<div class="row">' +
+        '<span class="pace-k">' + (vaBien ? "Llevas ahorrado este mes" : "Vas por encima del plan") + '</span>' +
+        '<span class="pace-v tnum ' + (vaBien ? "pos" : "neg") + '">' + (vaBien ? "+" : "") + fmt(p, r.diferencia) + '</span>' +
+      '</div>' +
+      '<p class="note-line">A día ' + r.diaActual + ' de ' + r.dias + ' tocaría llevar ' + fmt(p, r.esperado) + ' y llevas ' + fmt(p, r.gastadoMes) + '. Quedan ' + r.restantes + (r.restantes === 1 ? ' día' : ' días') + '.</p>' +
+    '</div>';
+  }
+
+  // Cuánto sobró (o faltó) en cada mes cerrado
+  function savingsByMonth(p){
+    if((Number(p.budget) || 0) <= 0) return "";
+    var actual = ymKey(new Date());
+    var meses = lastMonths(6).filter(function(ym){ return ym !== actual; }).reverse();
+    var conDatos = meses.filter(function(ym){ return monthTotalSpent(p, ym) > 0; });
+    if(!conDatos.length){
+      return '<div class="empty">Cuando cierre el mes verás aquí cuánto te sobró.</div>';
+    }
+    return conDatos.map(function(ym){
+      var gastado = monthTotalSpent(p, ym);
+      var pres = budgetFor(p, ym);
+      var sobra = pres.valor - gastado;
+      return '<div class="mesrow">' +
+        '<div style="min-width:0;">' +
+          '<div class="mes-nombre">' + monthLabel(ym) + '</div>' +
+          '<div class="mes-sub tnum">' + fmt(p, gastado) + ' de ' + fmt(p, pres.valor) +
+            (pres.guardado ? '' : ' <span class="mes-est">(estimado)</span>') + '</div>' +
+        '</div>' +
+        '<span class="pill ' + (sobra >= 0 ? "good" : "danger") + '">' + (sobra >= 0 ? "+" : "") + fmt(p, sobra) + '</span>' +
+      '</div>';
+    }).join("");
+  }
+  // ¿Algún mes del historial se está comparando sin registro propio?
+  function hayMesesEstimados(p){
+    var actual = ymKey(new Date());
+    return lastMonths(6).filter(function(ym){ return ym !== actual; })
+      .some(function(ym){ return monthTotalSpent(p, ym) > 0 && !budgetFor(p, ym).guardado; });
   }
 
   // ---------- gráfica mensual: gastos vs ahorro ----------
@@ -1416,10 +1604,18 @@
         '<div class="progress" style="margin-top:12px; height:10px;"><span style="width:' + Math.min(overallPct,100) + '%; background:' + (overallState==="danger"?"var(--danger)":overallState==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
         '<div class="row" style="margin-top:8px; font-size:.78rem; color:var(--ink-soft);"><span>Gastado: ' + fmt(p,spent) + '</span><span>' + Math.round(overallPct) + '% del mes</span></div>' +
       '</div>' +
+      (paceCard(p) ? '<div><div class="section-title">Tu ritmo</div>' + paceCard(p) + '</div>' : '') +
       '<div>' +
         '<div class="section-title">Gastos y ahorro por mes</div>' +
         '<div class="card">' + buildMonthlyChart(p) + '</div>' +
       '</div>' +
+      (Number(p.budget) > 0 ? '<div>' +
+        '<div class="section-title">¿Ahorraste en meses pasados?</div>' +
+        '<div class="card">' + savingsByMonth(p) + '</div>' +
+        '<p class="note-line">Cada mes se compara con el presupuesto que tenías entonces.' +
+          (hayMesesEstimados(p) ? ' Los marcados como estimado son de antes de que la app llevara ese registro, así que usan el presupuesto actual.' : '') +
+        '</p>' +
+      '</div>' : '') +
       '<div>' +
         '<div class="section-title">Por categoría</div>' +
         '<div class="card">' + catCards + '</div>' +
@@ -1475,6 +1671,14 @@
           'style="flex:1; min-width:0; width:100%; font-family:var(--font-display); font-size:1.8rem; font-weight:600; background:none; border:none; border-bottom:2px solid var(--line); color:var(--ink); padding:2px 0;">' +
         '</div>' +
         '<p class="note-line">Cuánto ingresa (o dispones) cada mes.</p>' +
+        (Number(p.budget) > 0 ? (function(){
+          var r = paceInfo(p);
+          return '<div class="split-row">' +
+            '<div class="split-cell"><span class="split-k">Por semana</span><span class="split-v tnum">' + fmt(p, r.planSemanal) + '</span></div>' +
+            '<div class="split-cell"><span class="split-k">Por día</span><span class="split-v tnum">' + fmt(p, r.planDiario) + '</span></div>' +
+          '</div>' +
+          '<p class="note-line">Tu presupuesto repartido en partes iguales entre los ' + r.dias + ' días de ' + monthLabel(r.ym).toLowerCase().replace(/ de \d+$/, "") + '.</p>';
+        })() : "") +
       '</div>' +
       '<div>' +
         '<div class="section-title">Reparto por categoría</div>' +
@@ -2503,6 +2707,7 @@
     view.oninput = function(e){
       if(e.target.id === "budget-input"){
         p.budget = parseNum(e.target.value);
+        rememberBudget(p);
         saveDB();
         refreshBudgetComputed(p);
         return;
