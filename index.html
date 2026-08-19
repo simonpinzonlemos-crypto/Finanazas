@@ -30,6 +30,9 @@
     --cat-1:#2B6E58; --cat-2:#B5762B; --cat-3:#A5533F; --cat-4:#4C6C93;
     --cat-5:#7C5A8C; --cat-6:#7A7C3D; --cat-7:#8C6239; --cat-8:#5C7A7A;
 
+    /* Series de la gráfica: validadas para daltonismo y contraste sobre la tarjeta */
+    --serie-gasto:#A75B14; --serie-ahorro:#1C7F5A;
+
     --font-display: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", serif;
     --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
@@ -54,6 +57,7 @@
       --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
       --cat-1:#5FBE9C; --cat-2:#E0A455; --cat-3:#D98567; --cat-4:#8AA9D6;
       --cat-5:#B98FCB; --cat-6:#B9BC6E; --cat-7:#C79A69; --cat-8:#9AC0C0;
+      --serie-gasto:#C2762A; --serie-ahorro:#2C9A88;
     }
   }
   :root[data-theme="dark"]{
@@ -75,6 +79,7 @@
     --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
     --cat-1:#5FBE9C; --cat-2:#E0A455; --cat-3:#D98567; --cat-4:#8AA9D6;
     --cat-5:#B98FCB; --cat-6:#B9BC6E; --cat-7:#C79A69; --cat-8:#9AC0C0;
+    --serie-gasto:#C2762A; --serie-ahorro:#2C9A88;
   }
 
   *{box-sizing:border-box;}
@@ -161,7 +166,7 @@
 
   .tabbar{
     position:sticky; bottom:0; z-index:5;
-    display:grid; grid-template-columns:repeat(4,1fr);
+    display:grid; grid-template-columns:repeat(5,1fr);
     background:var(--surface);
     border-top:1px solid var(--line);
     padding:6px 6px calc(6px + env(safe-area-inset-bottom)) 6px;
@@ -175,6 +180,9 @@
   }
   .tabbar button:active{background:var(--surface-2);}
   .tabbar button .dot{width:6px;height:6px;border-radius:50%;background:transparent;}
+  @media (max-width:360px){
+    .tabbar button{font-size:.66rem; padding-left:2px; padding-right:2px;}
+  }
   .tabbar button.active{color:var(--accent);}
   .tabbar button.active .dot{background:var(--accent);}
 
@@ -234,9 +242,17 @@
   .section-title:first-child{margin-top:0;}
 
   .catrow{
-    display:grid; grid-template-columns:10px minmax(0,1fr) 54px auto 40px;
+    display:grid; grid-template-columns:10px minmax(0,1fr) 96px 44px 40px;
     align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--line);
   }
+  .catrow-head{
+    display:grid; grid-template-columns:10px minmax(0,1fr) 96px 44px 40px;
+    gap:8px; margin-top:14px; padding-bottom:4px;
+    font-size:.66rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--ink-faint); border-bottom:1px solid var(--line);
+  }
+  .catrow-head span:nth-child(3){text-align:center;}
+  .catrow-head span:nth-child(4){text-align:right;}
   .catrow:last-child{border-bottom:none;}
   .catdot{width:10px;height:10px;border-radius:50%;}
   .catrow input.cat-name{
@@ -244,26 +260,27 @@
     font-weight:600; padding:2px 0; width:100%;
   }
   .catrow input.cat-name:focus{border-bottom-color:var(--accent);}
-  .catrow input.cat-percent{
+  .catrow input.cat-amount{
     background:var(--surface); border:1px solid var(--line); border-radius:8px;
-    padding:6px 4px; text-align:center; width:100%;
-    color:var(--ink); font-weight:700; font-family:var(--font-mono);
+    padding:6px 6px; text-align:right; width:100%;
+    color:var(--ink); font-weight:700; font-family:var(--font-mono); font-size:.85rem;
   }
   .catrow .catamt{font-family:var(--font-mono); font-size:.8rem; text-align:right; white-space:nowrap;}
 
   /* Solo en pantallas muy angostas la fila pasa a dos líneas, para que el nombre se lea */
-  @media (max-width:344px){
+  @media (max-width:360px){
     .catrow{
-      grid-template-columns:10px minmax(0,1fr) auto 40px;
+      grid-template-columns:10px minmax(0,1fr) 44px 40px;
       grid-template-areas:
         "dot nombre nombre borrar"
-        "dot pct    monto  borrar";
+        "dot monto  pct    borrar";
       row-gap:6px;
     }
+    .catrow-head{display:none;}
     .catrow .catdot{grid-area:dot; align-self:center;}
     .catrow .cat-name{grid-area:nombre;}
-    .catrow input.cat-percent{grid-area:pct; width:60px; justify-self:start;}
-    .catrow .catamt{grid-area:monto;}
+    .catrow input.cat-amount{grid-area:monto; width:100%;}
+    .catrow .catamt{grid-area:pct;}
     .catrow .icon-btn{grid-area:borrar; align-self:center;}
   }
 
@@ -329,6 +346,18 @@
 
   .chartwrap{margin-top:6px;}
   .chartwrap svg{width:100%; height:auto; display:block;}
+  .chart-mes{
+    font-family:var(--font-body); font-size:10px; fill:var(--ink-faint);
+    text-transform:capitalize;
+  }
+  .chart-eje{font-family:var(--font-mono); font-size:9px; fill:var(--ink-faint);}
+  .chart-leyenda{
+    display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:10px;
+    font-size:.78rem; color:var(--ink-soft);
+  }
+  .leg-item{display:inline-flex; align-items:center; gap:6px;}
+  .leg-item b{color:var(--ink); font-family:var(--font-mono);}
+  .leg-chip{width:10px; height:10px; border-radius:3px; flex-shrink:0;}
 
   /* ----- dona de distribución ----- */
   .donut-wrap{display:flex; flex-direction:column; gap:14px; align-items:center;}
@@ -388,6 +417,19 @@
     white-space:nowrap; margin-top:1px;
   }
   .falta-tasa{color:var(--warn);}
+
+  /* ----- deudas ----- */
+  .debt{padding:14px 0; border-bottom:1px solid var(--line);}
+  .debt:first-child{padding-top:0;}
+  .debt:last-child{border-bottom:none; padding-bottom:0;}
+  .debt.saldada{opacity:.62;}
+  .debt-person{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .debt-concept{font-size:.76rem; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .debt-left{font-family:var(--font-mono); font-weight:700; white-space:nowrap;}
+  .debt-paid{font-size:.7rem; color:var(--ink-faint); font-family:var(--font-mono); white-space:nowrap;}
+  .debt .amounts{font-family:var(--font-mono); font-size:.72rem; color:var(--ink-soft);}
+  .headline.pos{color:var(--good);}
+  .headline.neg{color:var(--danger);}
 
   /* ----- tasa de cambio ----- */
   .fxbar{
@@ -575,12 +617,12 @@
 
   function seedCategories(){
     return [
-      {id:uid(), name:"Vivienda", percent:30, colorIdx:0},
-      {id:uid(), name:"Comida", percent:20, colorIdx:1},
-      {id:uid(), name:"Transporte", percent:10, colorIdx:2},
-      {id:uid(), name:"Ocio", percent:10, colorIdx:3},
-      {id:uid(), name:"Ahorro", percent:15, colorIdx:4},
-      {id:uid(), name:"Otros", percent:15, colorIdx:5}
+      {id:uid(), name:"Vivienda", amount:0, colorIdx:0},
+      {id:uid(), name:"Comida", amount:0, colorIdx:1},
+      {id:uid(), name:"Transporte", amount:0, colorIdx:2},
+      {id:uid(), name:"Ocio", amount:0, colorIdx:3},
+      {id:uid(), name:"Ahorro", amount:0, colorIdx:4},
+      {id:uid(), name:"Otros", amount:0, colorIdx:5}
     ];
   }
 
@@ -588,6 +630,7 @@
     var id = uid();
     DB.profiles[id] = {
       id: id, name: name, currency: "$", currencyCode: "COP",
+      debts: [],
       budget: 0,
       catColorSeq: 6,
       categories: seedCategories(),
@@ -601,6 +644,13 @@
     return id;
   }
 
+  // Deja todos los perfiles al día y guarda una sola vez, para que la conversión
+  // de porcentajes a montos no se repita en cada carga.
+  function migrateAll(){
+    Object.keys(DB.profiles).forEach(function(id){ normalizeProfile(DB.profiles[id]); });
+    saveDB();
+  }
+
   // Los perfiles creados antes de esta versión no traen metas ni tipos de ahorro.
   function normalizeProfile(p){
     if(!p) return p;
@@ -608,6 +658,17 @@
     if(!p.fxRates || typeof p.fxRates !== "object") p.fxRates = {};
     if(!Array.isArray(p.goals)) p.goals = [];
     if(!Array.isArray(p.holdings)) p.holdings = [];
+    if(!Array.isArray(p.debts)) p.debts = [];
+    // Antes se asignaba por porcentaje; ahora se asigna el monto directo.
+    // Convertimos una sola vez lo que ya tenías.
+    if(Array.isArray(p.categories)){
+      p.categories.forEach(function(c){
+        if(c.amount == null){
+          var pct = Number(c.percent) || 0;
+          c.amount = (Number(p.budget) > 0) ? (Number(p.budget) * pct / 100) : 0;
+        }
+      });
+    }
     if(!Array.isArray(p.savings)) p.savings = [];
     if(!Array.isArray(p.interest)) p.interest = [];
     if(!Array.isArray(p.expenses)) p.expenses = [];
@@ -824,7 +885,7 @@
       '</header>' +
       '<main class="view" id="view"></main>' +
       '<nav class="tabbar" id="tabbar">' +
-        tabBtn("resumen","Resumen") + tabBtn("presupuesto","Presupuesto") + tabBtn("gastos","Gastos") + tabBtn("ahorros","Ahorros") +
+        tabBtn("resumen","Resumen") + tabBtn("presupuesto","Plan") + tabBtn("gastos","Gastos") + tabBtn("ahorros","Ahorros") + tabBtn("deudas","Deudas") +
       '</nav>';
     document.getElementById("profileBtn").addEventListener("click", openProfileSheet);
     document.getElementById("tabbar").addEventListener("click", function(e){
@@ -854,6 +915,7 @@
     else if(currentTab === "presupuesto") view.innerHTML = viewPresupuesto(p);
     else if(currentTab === "gastos") view.innerHTML = viewGastos(p);
     else if(currentTab === "ahorros") view.innerHTML = viewAhorros(p);
+    else if(currentTab === "deudas") view.innerHTML = viewDeudas(p);
     bindViewEvents();
   }
 
@@ -1070,6 +1132,7 @@
         interest: Array.isArray(pr.interest) ? pr.interest : [],
         goals: Array.isArray(pr.goals) ? pr.goals : [],
         holdings: Array.isArray(pr.holdings) ? pr.holdings : [],
+        debts: Array.isArray(pr.debts) ? pr.debts : [],
         createdAt: pr.createdAt || Date.now()
       };
       count++;
@@ -1193,8 +1256,89 @@
   function monthTotalSpent(p, ym){
     return monthExpenses(p, ym).reduce(function(s,e){ return s + Number(e.amount); }, 0);
   }
-  function pctSum(p){
-    return p.categories.reduce(function(s,c){ return s + (Number(c.percent)||0); }, 0);
+  // Cuánto tienes repartido entre categorías
+  function assignedSum(p){
+    return p.categories.reduce(function(s,c){ return s + (Number(c.amount)||0); }, 0);
+  }
+  // El porcentaje ahora sale del monto, no al revés
+  function catPercent(p, c){
+    var b = Number(p.budget) || 0;
+    if(b <= 0) return 0;
+    return ((Number(c.amount)||0) / b) * 100;
+  }
+
+  // ---------- gráfica mensual: gastos vs ahorro ----------
+  function monthSaved(p, ym){
+    var s = p.savings.reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? Number(x.amount)||0 : 0); }, 0);
+    var i = p.interest.reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? Number(x.amount)||0 : 0); }, 0);
+    return s + i;
+  }
+  function lastMonths(n){
+    var hoy = ymKey(new Date());
+    var out = [];
+    for(var k = n - 1; k >= 0; k--) out.push(ymAdd(hoy, -k));
+    return out;
+  }
+  function shortMonth(ym){
+    var partes = ym.split("-");
+    var d = new Date(Number(partes[0]), Number(partes[1]) - 1, 1);
+    return new Intl.DateTimeFormat("es", {month:"short"}).format(d).replace(".", "");
+  }
+  // Barra con las esquinas de arriba redondeadas, apoyada en el eje
+  function barPath(x, y, w, h, r){
+    if(h <= 0) return "";
+    var rr = Math.min(r, w/2, h);
+    return "M" + x + "," + (y+h) +
+           " L" + x + "," + (y+rr) +
+           " Q" + x + "," + y + " " + (x+rr) + "," + y +
+           " L" + (x+w-rr) + "," + y +
+           " Q" + (x+w) + "," + y + " " + (x+w) + "," + (y+rr) +
+           " L" + (x+w) + "," + (y+h) + " Z";
+  }
+
+  function buildMonthlyChart(p){
+    var meses = lastMonths(6);
+    var datos = meses.map(function(ym){
+      return { ym: ym, gasto: monthTotalSpent(p, ym), ahorro: monthSaved(p, ym) };
+    });
+    var max = datos.reduce(function(m,d){ return Math.max(m, d.gasto, d.ahorro); }, 0);
+    if(max <= 0){
+      return '<div class="empty">Cuando registres gastos o ahorros, aquí verás cómo va cada mes.</div>';
+    }
+
+    var W = 320, H = 168, padL = 6, padR = 6, padTop = 14, base = H - 26;
+    var alto = base - padTop;
+    var anchoGrupo = (W - padL - padR) / meses.length;
+    var anchoBarra = Math.min(16, (anchoGrupo - 10) / 2);
+    var sep = 2; // separación entre las dos barras del mismo mes
+
+    var barras = datos.map(function(d, i){
+      var centro = padL + anchoGrupo * i + anchoGrupo / 2;
+      var x1 = centro - anchoBarra - sep / 2;
+      var x2 = centro + sep / 2;
+      var h1 = max > 0 ? (d.gasto / max) * alto : 0;
+      var h2 = max > 0 ? (d.ahorro / max) * alto : 0;
+      var partes = "";
+      if(h1 > 0) partes += '<path d="' + barPath(x1, base - h1, anchoBarra, h1, 4) + '" fill="var(--serie-gasto)"><title>' + shortMonth(d.ym) + ' · gastos ' + fmt(p, d.gasto) + '</title></path>';
+      if(h2 > 0) partes += '<path d="' + barPath(x2, base - h2, anchoBarra, h2, 4) + '" fill="var(--serie-ahorro)"><title>' + shortMonth(d.ym) + ' · ahorro ' + fmt(p, d.ahorro) + '</title></path>';
+      partes += '<text x="' + centro + '" y="' + (H - 8) + '" text-anchor="middle" class="chart-mes">' + shortMonth(d.ym) + '</text>';
+      return partes;
+    }).join("");
+
+    var ultimo = datos[datos.length - 1];
+    return '<div class="chartwrap">' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Gastos y ahorro de los últimos 6 meses">' +
+        '<line x1="' + padL + '" y1="' + padTop + '" x2="' + (W-padR) + '" y2="' + padTop + '" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>' +
+        '<text x="' + padL + '" y="' + (padTop - 4) + '" class="chart-eje">' + fmt(p, max) + '</text>' +
+        '<line x1="' + padL + '" y1="' + base + '" x2="' + (W-padR) + '" y2="' + base + '" stroke="var(--line)" stroke-width="1"/>' +
+        barras +
+      '</svg>' +
+      '<div class="chart-leyenda">' +
+        '<span class="leg-item"><span class="leg-chip" style="background:var(--serie-gasto)"></span>Gastos <b class="tnum">' + fmt(p, ultimo.gasto) + '</b></span>' +
+        '<span class="leg-item"><span class="leg-chip" style="background:var(--serie-ahorro)"></span>Ahorro <b class="tnum">' + fmt(p, ultimo.ahorro) + '</b></span>' +
+      '</div>' +
+      '<p class="note-line">Últimos 6 meses. Las cifras en negrita son las de ' + monthLabel(ultimo.ym).toLowerCase() + '.</p>' +
+    '</div>';
   }
 
   // ---------- Resumen ----------
@@ -1248,7 +1392,7 @@
 
     var catCards = p.categories.map(function(c, idx){
       var sp = spentByCat[c.id] || 0;
-      var alloc = p.budget * (c.percent/100);
+      var alloc = Number(c.amount) || 0;
       var pct = alloc > 0 ? clamp((sp/alloc)*100, 0, 100) : (sp>0?100:0);
       var state = alloc > 0 && sp > alloc ? "danger" : pct >= 85 ? "warn" : "good";
       return '<div class="catcard">' +
@@ -1273,6 +1417,10 @@
         '<div class="row" style="margin-top:8px; font-size:.78rem; color:var(--ink-soft);"><span>Gastado: ' + fmt(p,spent) + '</span><span>' + Math.round(overallPct) + '% del mes</span></div>' +
       '</div>' +
       '<div>' +
+        '<div class="section-title">Gastos y ahorro por mes</div>' +
+        '<div class="card">' + buildMonthlyChart(p) + '</div>' +
+      '</div>' +
+      '<div>' +
         '<div class="section-title">Por categoría</div>' +
         '<div class="card">' + catCards + '</div>' +
         (orphanSpent > 0 ? '<p class="note-line">Gastos sin categoría (eliminada): ' + fmt(p, orphanSpent) + '</p>' : '') +
@@ -1285,20 +1433,35 @@
   }
 
   // ---------- Presupuesto ----------
-  function viewPresupuesto(p){
-    var total = pctSum(p);
-    var bar = p.categories.map(function(c, idx){
-      var w = clamp(Number(c.percent)||0, 0, 100);
+  function budgetBarHtml(p){
+    var b = Number(p.budget) || 0;
+    var asignado = assignedSum(p);
+    var escala = Math.max(b, asignado) || 1;
+    return p.categories.map(function(c, idx){
+      var w = ((Number(c.amount)||0) / escala) * 100;
       return '<span style="width:' + w + '%; background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span>';
     }).join("");
+  }
+
+  function budgetStatus(p){
+    var b = Number(p.budget) || 0;
+    var asignado = assignedSum(p);
+    var resto = b - asignado;
+    if(b <= 0) return {clase:"warn", izq: fmt(p, asignado) + " repartidos", der:"Pon primero tu presupuesto"};
+    if(Math.abs(resto) < 1) return {clase:"ok", izq:"100% repartido", der:"Todo el presupuesto asignado"};
+    if(resto > 0) return {clase:"warn", izq: Math.round((asignado/b)*100) + "% repartido", der:"Te quedan " + fmt(p, resto)};
+    return {clase:"warn", izq: Math.round((asignado/b)*100) + "% repartido", der:"Te pasaste " + fmt(p, -resto)};
+  }
+
+  function viewPresupuesto(p){
+    var estado = budgetStatus(p);
 
     var rows = p.categories.map(function(c, idx){
-      var amt = p.budget * ((Number(c.percent)||0)/100);
       return '<div class="catrow">' +
         '<span class="catdot" style="background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span>' +
         '<input class="cat-name" data-id="' + c.id + '" value="' + esc(c.name) + '" maxlength="20" aria-label="Nombre de categoría">' +
-        '<input class="cat-percent" type="number" inputmode="numeric" min="0" max="100" step="1" data-id="' + c.id + '" value="' + c.percent + '" aria-label="Porcentaje">' +
-        '<span class="catamt tnum" id="amt-' + c.id + '">' + fmt(p, amt) + '</span>' +
+        '<input class="cat-amount" type="text" inputmode="decimal" data-id="' + c.id + '" value="' + (Number(c.amount)||0) + '" aria-label="Monto asignado">' +
+        '<span class="catamt tnum" id="amt-' + c.id + '">' + fmtPct(catPercent(p, c), 1) + '%</span>' +
         '<button class="icon-btn" data-delcat="' + c.id + '" title="Eliminar categoría">✕</button>' +
       '</div>';
     }).join("");
@@ -1316,40 +1479,191 @@
       '<div>' +
         '<div class="section-title">Reparto por categoría</div>' +
         '<div class="card">' +
-          '<div class="allocbar" id="alloc-bar">' + bar + '</div>' +
-          '<div class="pcttotal ' + (total===100?"ok":"warn") + '" id="pct-total">' +
-            '<span id="pct-total-value">' + total + '%</span>' +
-            '<span>' + (total===100 ? "Presupuesto totalmente asignado" : total < 100 ? "Faltan " + (100-total) + "% por asignar" : "Te pasaste " + (total-100) + "%") + '</span>' +
+          '<div class="allocbar" id="alloc-bar">' + budgetBarHtml(p) + '</div>' +
+          '<div class="pcttotal ' + estado.clase + '" id="pct-total">' +
+            '<span id="pct-total-value">' + estado.izq + '</span>' +
+            '<span>' + estado.der + '</span>' +
           '</div>' +
-          '<div style="margin-top:12px;" id="cat-rows">' + rows + '</div>' +
+          '<div class="catrow-head">' +
+            '<span></span><span>Categoría</span><span>Monto</span><span>%</span><span></span>' +
+          '</div>' +
+          '<div id="cat-rows">' + rows + '</div>' +
           '<button class="btn ghost block" style="margin-top:12px;" data-action="add-category">+ Añadir categoría</button>' +
+          '<p class="note-line">Escribe cuánto le asignas a cada categoría; el porcentaje se calcula solo.</p>' +
         '</div>' +
       '</div>' +
     '</div>';
   }
 
   function refreshBudgetComputed(p){
-    var total = pctSum(p);
+    var estado = budgetStatus(p);
     p.categories.forEach(function(c){
       var el = document.getElementById("amt-" + c.id);
-      if(el) el.textContent = fmt(p, p.budget * ((Number(c.percent)||0)/100));
+      if(el) el.textContent = fmtPct(catPercent(p, c), 1) + "%";
     });
     var tv = document.getElementById("pct-total-value");
-    if(tv) tv.textContent = total + "%";
+    if(tv) tv.textContent = estado.izq;
     var wrap = document.getElementById("pct-total");
     if(wrap){
-      wrap.classList.toggle("ok", total===100);
-      wrap.classList.toggle("warn", total!==100);
+      wrap.classList.toggle("ok", estado.clase === "ok");
+      wrap.classList.toggle("warn", estado.clase !== "ok");
       var msg = wrap.querySelector("span:last-child");
-      if(msg) msg.textContent = total===100 ? "Presupuesto totalmente asignado" : total < 100 ? "Faltan " + (100-total) + "% por asignar" : "Te pasaste " + (total-100) + "%";
+      if(msg) msg.textContent = estado.der;
     }
     var bar = document.getElementById("alloc-bar");
-    if(bar){
-      bar.innerHTML = p.categories.map(function(c, idx){
-        var w = clamp(Number(c.percent)||0, 0, 100);
-        return '<span style="width:' + w + '%; background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span>';
+    if(bar) bar.innerHTML = budgetBarHtml(p);
+  }
+
+  // ---------- Deudas ----------
+  function debtPaid(d){
+    return (d.payments || []).reduce(function(s,x){ return s + (Number(x.amount)||0); }, 0);
+  }
+  function debtLeft(d){
+    return Math.max(0, (Number(d.amount)||0) - debtPaid(d));
+  }
+  function debtsTotal(p, kind){
+    return p.debts.filter(function(d){ return d.kind === kind; })
+                  .reduce(function(s,d){ return s + debtLeft(d); }, 0);
+  }
+
+  function viewDeudas(p){
+    var debo = debtsTotal(p, "debo");
+    var meDeben = debtsTotal(p, "prestado");
+    var neto = meDeben - debo;
+
+    function lista(kind){
+      var items = p.debts.filter(function(d){ return d.kind === kind; })
+        .sort(function(a,b){ return debtLeft(b) - debtLeft(a); });
+      if(!items.length){
+        return '<div class="empty">' + (kind === "debo" ? "No tienes deudas registradas." : "Nadie te debe por ahora.") + '</div>';
+      }
+      return items.map(function(d){
+        var total = Number(d.amount) || 0;
+        var pagado = debtPaid(d);
+        var falta = debtLeft(d);
+        var pct = total > 0 ? clamp((pagado / total) * 100, 0, 100) : 0;
+        var saldada = falta <= 0;
+        return '<div class="debt' + (saldada ? " saldada" : "") + '">' +
+          '<div class="row">' +
+            '<div style="min-width:0;">' +
+              '<div class="debt-person">' + esc(d.person) + '</div>' +
+              (d.concept ? '<div class="debt-concept">' + esc(d.concept) + '</div>' : '') +
+            '</div>' +
+            '<div class="row" style="gap:4px;">' +
+              '<div style="text-align:right;">' +
+                '<div class="debt-left tnum">' + (saldada ? "Saldada" : fmt(p, falta)) + '</div>' +
+                (pagado > 0 && !saldada ? '<div class="debt-paid tnum">pagado ' + fmt(p, pagado) + '</div>' : '') +
+              '</div>' +
+              '<button class="icon-btn" data-deldebt="' + d.id + '" title="Eliminar">✕</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="progress" style="margin-top:8px;"><span style="width:' + pct + '%; background:' + (saldada ? "var(--good)" : "var(--accent)") + '"></span></div>' +
+          '<div class="amounts row" style="margin-top:6px;">' +
+            '<span>' + fmt(p, pagado) + ' de ' + fmt(p, total) + '</span>' +
+            '<span>' + (d.date ? dateShort(d.date) : "") + '</span>' +
+          '</div>' +
+          (saldada ? '' : '<button class="linkbtn" data-paydebt="' + d.id + '">Registrar ' + (kind === "debo" ? "pago" : "abono recibido") + '</button>') +
+        '</div>';
       }).join("");
     }
+
+    return '<div class="stack">' +
+      '<div class="card">' +
+        '<div class="eyebrow">Balance de deudas</div>' +
+        '<div class="headline tnum ' + (neto >= 0 ? "pos" : "neg") + '">' + (neto >= 0 ? "+" : "") + fmt(p, neto) + '</div>' +
+        '<div class="sub">' + (neto >= 0 ? "a tu favor" : "en contra") + '</div>' +
+        '<div class="row" style="margin-top:12px; font-size:.82rem;">' +
+          '<span>Debo: <b class="tnum neg">' + fmt(p, debo) + '</b></span>' +
+          '<span>Me deben: <b class="tnum pos">' + fmt(p, meDeben) + '</b></span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="fab-row" style="margin-top:0;">' +
+        '<button class="btn block" data-action="add-debt-debo">+ Yo debo</button>' +
+        '<button class="btn secondary block" data-action="add-debt-prestado">+ Me deben</button>' +
+      '</div>' +
+
+      '<div>' +
+        '<div class="section-title">Lo que debo</div>' +
+        '<div class="card">' + lista("debo") + '</div>' +
+      '</div>' +
+
+      '<div>' +
+        '<div class="section-title">Lo que me deben</div>' +
+        '<div class="card">' + lista("prestado") + '</div>' +
+      '</div>' +
+
+      '<p class="note-line">Estos movimientos son aparte de tu presupuesto. Si un pago también fue un gasto del mes, regístralo además en Gastos.</p>' +
+    '</div>';
+  }
+
+  function openAddDebt(kind){
+    var p = activeProfile();
+    var esDebo = kind === "debo";
+    openSheet(
+      '<div class="sheet-head"><h3>' + (esDebo ? "Registrar algo que debo" : "Registrar algo que me deben") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="debtForm" class="stack">' +
+        '<label class="field">' + (esDebo ? "¿A quién le debes?" : "¿Quién te debe?") + '<input type="text" id="dPerson" maxlength="30" placeholder="Nombre" required></label>' +
+        '<label class="field">Monto<input type="text" id="dAmount" inputmode="decimal" placeholder="Ej. 150.000" required></label>' +
+        '<label class="field">¿Por qué? (opcional)<input type="text" id="dConcept" maxlength="60" placeholder="Ej. Préstamo, almuerzo"></label>' +
+        '<label class="field">Fecha<input type="date" id="dDate" value="' + todayStr() + '"></label>' +
+        '<button class="btn block" type="submit">Guardar</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("debtForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var person = document.getElementById("dPerson").value.trim();
+      var amount = parseNum(document.getElementById("dAmount").value);
+      if(!person) return;
+      if(!amount || amount <= 0){
+        showMessageSheet("Falta el monto", "Escribe de cuánto es la deuda, por ejemplo 150.000.");
+        return;
+      }
+      p.debts.push({
+        id: uid(), kind: kind, person: person, amount: amount,
+        concept: document.getElementById("dConcept").value.trim(),
+        date: document.getElementById("dDate").value || todayStr(),
+        payments: []
+      });
+      saveDB();
+      closeSheet();
+      currentTab = "deudas";
+      renderApp();
+      showToast("Registrado.");
+    });
+  }
+
+  function openPayDebt(id){
+    var p = activeProfile();
+    var d = null;
+    for(var i=0;i<p.debts.length;i++){ if(p.debts[i].id === id) d = p.debts[i]; }
+    if(!d) return;
+    var falta = debtLeft(d);
+    openSheet(
+      '<div class="sheet-head"><h3>' + (d.kind === "debo" ? "Registrar pago" : "Registrar abono") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">' + esc(d.person) + ' · faltan <b>' + fmt(p, falta) + '</b></p>' +
+      '<form id="payForm" class="stack" style="margin-top:12px;">' +
+        '<label class="field">Monto<input type="text" id="payAmount" inputmode="decimal" value="' + falta + '" required></label>' +
+        '<label class="field">Fecha<input type="date" id="payDate" value="' + todayStr() + '"></label>' +
+        '<button class="btn block" type="submit">Guardar</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("payForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var amount = parseNum(document.getElementById("payAmount").value);
+      if(!amount || amount <= 0){
+        showMessageSheet("Falta el monto", "Escribe cuánto se pagó.");
+        return;
+      }
+      d.payments = d.payments || [];
+      d.payments.push({ id: uid(), date: document.getElementById("payDate").value || todayStr(), amount: amount });
+      saveDB();
+      closeSheet();
+      renderView();
+      showToast(debtLeft(d) <= 0 ? "¡Deuda saldada!" : "Quedan " + fmt(p, debtLeft(d)) + ".");
+    });
   }
 
   // ---------- Gastos ----------
@@ -2037,7 +2351,7 @@
 
   // ---------- add category ----------
   function addCategory(p){
-    var c = { id: uid(), name: "Nueva categoría", percent: 0, colorIdx: p.catColorSeq || p.categories.length };
+    var c = { id: uid(), name: "Nueva categoría", amount: 0, colorIdx: p.catColorSeq || p.categories.length };
     p.catColorSeq = (p.catColorSeq || p.categories.length) + 1;
     p.categories.push(c);
     saveDB();
@@ -2074,6 +2388,29 @@
         else if(a === "add-holding") openHoldingSheet(null);
         else if(a === "refresh-prices") refreshPrices();
         else if(a === "edit-fx") openFxSheet();
+        else if(a === "add-debt-debo") openAddDebt("debo");
+        else if(a === "add-debt-prestado") openAddDebt("prestado");
+        return;
+      }
+
+      var pay = e.target.closest("[data-paydebt]");
+      if(pay){ openPayDebt(pay.dataset.paydebt); return; }
+
+      var deldebt = e.target.closest("[data-deldebt]");
+      if(deldebt){
+        var did = deldebt.dataset.deldebt;
+        var deuda = null;
+        for(var di=0; di<p.debts.length; di++){ if(p.debts[di].id === did) deuda = p.debts[di]; }
+        askConfirm({
+          title: "Eliminar registro",
+          body: 'Se borrará la deuda de ' + (deuda ? deuda.person : "") + ' y sus pagos. Esta acción no se puede deshacer.',
+          confirmLabel: "Eliminar",
+          danger: true,
+          onConfirm: function(){
+            p.debts = p.debts.filter(function(x){ return x.id !== did; });
+            saveDB(); renderView();
+          }
+        });
         return;
       }
 
@@ -2170,10 +2507,10 @@
         refreshBudgetComputed(p);
         return;
       }
-      if(e.target.classList.contains("cat-percent")){
+      if(e.target.classList.contains("cat-amount")){
         var cat = getCategory(p, e.target.dataset.id);
         if(cat){
-          cat.percent = clamp(Number(e.target.value)||0, 0, 999);
+          cat.amount = Math.max(0, parseNum(e.target.value));
           saveDB();
           refreshBudgetComputed(p);
         }
@@ -2195,6 +2532,7 @@
     };
   }
 
+  migrateAll();
   renderApp();
 })();
 </script>
