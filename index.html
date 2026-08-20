@@ -428,6 +428,30 @@
   .pace-k{font-size:.82rem; color:var(--ink-soft); font-weight:600;}
   .pace-v{font-family:var(--font-mono); font-size:.85rem; font-weight:600; white-space:nowrap;}
 
+  .desglose{
+    margin-top:12px; padding-top:10px; border-top:1px dashed var(--line);
+    display:flex; flex-direction:column; gap:5px;
+  }
+  .desg-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    font-size:.78rem; color:var(--ink-soft);
+  }
+  .desg-row .tnum{font-family:var(--font-mono); font-weight:600;}
+  .desg-row.pos{color:var(--good);}
+  .desg-row.neg{color:var(--danger);}
+  .ajustado{
+    display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
+    background:var(--accent-soft); color:var(--accent);
+    font-size:.62rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+    vertical-align:middle;
+  }
+  .tag-rec{
+    display:inline-block; margin-left:5px; padding:1px 6px; border-radius:999px;
+    background:var(--surface); border:1px solid var(--line); color:var(--ink-faint);
+    font-size:.6rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    vertical-align:middle;
+  }
+
   .ciclo-tag{
     display:inline-block; margin-bottom:10px;
     background:var(--accent-soft); color:var(--accent);
@@ -691,6 +715,7 @@
       catColorSeq: 6,
       categories: seedCategories(),
       expenses: [], savings: [], interest: [],
+      incomes: [], recurring: [], recurringDone: {},
       goals: [], holdings: [],
       fxRates: {}, fxUpdatedAt: "",
       createdAt: Date.now()
@@ -706,6 +731,7 @@
     Object.keys(DB.profiles).forEach(function(id){
       var p = normalizeProfile(DB.profiles[id]);
       rememberBudget(p);
+      applyRecurring(p);
     });
     saveDB();
   }
@@ -735,6 +761,9 @@
     if(!Array.isArray(p.debts)) p.debts = [];
     if(!p.budgetHistory || typeof p.budgetHistory !== "object") p.budgetHistory = {};
     if(!(Number(p.cycleStartDay) >= 1)) p.cycleStartDay = 1;
+    if(!Array.isArray(p.incomes)) p.incomes = [];
+    if(!Array.isArray(p.recurring)) p.recurring = [];
+    if(!p.recurringDone || typeof p.recurringDone !== "object") p.recurringDone = {};
     // Antes se asignaba por porcentaje; ahora se asigna el monto directo.
     // Convertimos una sola vez lo que ya tenías.
     if(Array.isArray(p.categories)){
@@ -1211,6 +1240,9 @@
         debts: Array.isArray(pr.debts) ? pr.debts : [],
         budgetHistory: (pr.budgetHistory && typeof pr.budgetHistory === "object") ? pr.budgetHistory : {},
         cycleStartDay: Number(pr.cycleStartDay) >= 1 ? Number(pr.cycleStartDay) : 1,
+        incomes: Array.isArray(pr.incomes) ? pr.incomes : [],
+        recurring: Array.isArray(pr.recurring) ? pr.recurring : [],
+        recurringDone: (pr.recurringDone && typeof pr.recurringDone === "object") ? pr.recurringDone : {},
         createdAt: pr.createdAt || Date.now()
       };
       count++;
@@ -1400,6 +1432,82 @@
     };
     return f(c.desde) + " – " + f(c.hasta);
   }
+  // ---------- gastos recurrentes (suscripciones, servicios) ----------
+  // Cuándo cae este cobro dentro del periodo en curso
+  function recurringDateInCycle(r, ciclo){
+    var dia = clamp(Math.round(Number(r.day) || 1), 1, 31);
+    var candidatos = [];
+    [ciclo.desde, ciclo.hasta].forEach(function(iso){
+      var q = iso.split("-");
+      var y = Number(q[0]), m = Number(q[1]) - 1;
+      candidatos.push(isoDate(new Date(y, m, clampDay(y, m, dia))));
+    });
+    for(var i=0;i<candidatos.length;i++){
+      if(candidatos[i] >= ciclo.desde && candidatos[i] <= ciclo.hasta) return candidatos[i];
+    }
+    return ciclo.desde;
+  }
+  // Registra los que ya pasaron de fecha, una sola vez por periodo.
+  // Si borras el gasto generado, no vuelve a aparecer.
+  function applyRecurring(p){
+    if(!p.recurring.length) return false;
+    var ciclo = currentCycle(p);
+    var hoy = todayStr();
+    var creados = 0;
+    p.recurring.forEach(function(r){
+      var fecha = recurringDateInCycle(r, ciclo);
+      if(fecha > hoy) return;                       // todavía no le toca
+      var clave = r.id + "|" + ciclo.desde;
+      if(p.recurringDone[clave]) return;            // ya se registró este periodo
+      p.expenses.push({
+        id: uid(), date: fecha,
+        categoryId: r.categoryId,
+        amount: Number(r.amount) || 0,
+        note: r.name,
+        recurringId: r.id
+      });
+      p.recurringDone[clave] = true;
+      creados++;
+    });
+    return creados > 0;
+  }
+
+  // ---------- todo lo que entra y sale en un rango ----------
+  function incomesInRange(p, desde, hasta){
+    return p.incomes.reduce(function(s,x){
+      var d = String(x.date);
+      return s + ((d >= desde && d <= hasta) ? (Number(x.amount)||0) : 0);
+    }, 0);
+  }
+  // Pagos de deudas: "debo" es plata que sale, "prestado" es plata que vuelve
+  function debtPaymentsInRange(p, desde, hasta, kind){
+    return p.debts.reduce(function(s,d){
+      if(d.kind !== kind) return s;
+      return s + (d.payments || []).reduce(function(a,x){
+        var f = String(x.date);
+        return a + ((f >= desde && f <= hasta) ? (Number(x.amount)||0) : 0);
+      }, 0);
+    }, 0);
+  }
+
+  // El balance del periodo en curso, con todo incluido
+  function periodTotals(p){
+    var c = currentCycle(p);
+    var base = Number(p.budget) || 0;
+    var gastos = spentInRange(p, c.desde, c.hasta);
+    var ingresos = incomesInRange(p, c.desde, c.hasta);
+    var cobros = debtPaymentsInRange(p, c.desde, c.hasta, "prestado");
+    var pagos = debtPaymentsInRange(p, c.desde, c.hasta, "debo");
+    var total = base + ingresos + cobros;   // todo lo que tienes para el periodo
+    var salidas = gastos + pagos;           // todo lo que se fue
+    return {
+      ciclo: c, base: base,
+      gastos: gastos, ingresos: ingresos, cobros: cobros, pagos: pagos,
+      total: total, salidas: salidas, disponible: total - salidas,
+      hayExtras: (ingresos > 0 || cobros > 0 || pagos > 0)
+    };
+  }
+
   function spentByCategoryInRange(p, desde, hasta){
     var map = {};
     p.expenses.forEach(function(e){
@@ -1424,15 +1532,16 @@
   }
 
   function paceInfo(p){
-    var ciclo = currentCycle(p);
+    var T = periodTotals(p);
+    var ciclo = T.ciclo;
     var hoyStr = todayStr();
     var dias = ciclo.dias;
     var diaActual = ciclo.diaActual;
     var restantes = Math.max(1, dias - diaActual + 1); // hoy cuenta
-    var presupuesto = Number(p.budget) || 0;
+    var presupuesto = T.total; // presupuesto ya ajustado con ingresos y deudas
 
-    var gastadoMes = spentInRange(p, ciclo.desde, ciclo.hasta);
-    var gastadoHoy = spentInRange(p, hoyStr, hoyStr);
+    var gastadoMes = T.salidas;
+    var gastadoHoy = spentInRange(p, hoyStr, hoyStr) + debtPaymentsInRange(p, hoyStr, hoyStr, "debo");
     var gastadoAntesDeHoy = gastadoMes - gastadoHoy;
 
     // Plan puro: repartir el presupuesto en partes iguales
@@ -1636,11 +1745,12 @@
   function viewResumen(p){
     var thisMonth = ymKey(new Date());
     // El periodo en curso: el mes calendario, o tu ciclo si lo configuraste
-    var ciclo = currentCycle(p);
-    var spent = spentInRange(p, ciclo.desde, ciclo.hasta);
-    var remaining = p.budget - spent;
+    var T = periodTotals(p);
+    var ciclo = T.ciclo;
+    var spent = T.gastos;
+    var remaining = T.disponible;
     var spentByCat = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta);
-    var overallPct = p.budget > 0 ? clamp((spent / p.budget) * 100, 0, 999) : 0;
+    var overallPct = T.total > 0 ? clamp((T.salidas / T.total) * 100, 0, 999) : 0;
     var overallState = overallPct >= 100 ? "danger" : overallPct >= 85 ? "warn" : "good";
 
     if(!p.budget){
@@ -1678,9 +1788,17 @@
       '<div class="card">' +
         '<div class="eyebrow">' + (ciclo.personalizado ? cycleLabel(ciclo) : monthLabel(thisMonth)) + '</div>' +
         '<div class="headline tnum">' + fmt(p, remaining) + '</div>' +
-        '<div class="sub">disponible de ' + fmt(p, p.budget) + '</div>' +
+        '<div class="sub">disponible de ' + fmt(p, T.total) + (T.hayExtras ? ' <span class="ajustado">ajustado</span>' : '') + '</div>' +
         '<div class="progress" style="margin-top:12px; height:10px;"><span style="width:' + Math.min(overallPct,100) + '%; background:' + (overallState==="danger"?"var(--danger)":overallState==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
         '<div class="row" style="margin-top:8px; font-size:.78rem; color:var(--ink-soft);"><span>Gastado: ' + fmt(p,spent) + '</span><span>' + Math.round(overallPct) + '% ' + (ciclo.personalizado ? "del periodo" : "del mes") + '</span></div>' +
+        (T.hayExtras ?
+          '<div class="desglose">' +
+            '<div class="desg-row"><span>Presupuesto</span><span class="tnum">' + fmt(p, T.base) + '</span></div>' +
+            (T.ingresos > 0 ? '<div class="desg-row pos"><span>+ Ingresos extra</span><span class="tnum">' + fmt(p, T.ingresos) + '</span></div>' : '') +
+            (T.cobros > 0 ? '<div class="desg-row pos"><span>+ Te pagaron deudas</span><span class="tnum">' + fmt(p, T.cobros) + '</span></div>' : '') +
+            (T.pagos > 0 ? '<div class="desg-row neg"><span>− Pagaste deudas</span><span class="tnum">' + fmt(p, T.pagos) + '</span></div>' : '') +
+          '</div>'
+        : '') +
       '</div>' +
       (paceCard(p) ? '<div><div class="section-title">Tu ritmo</div>' + paceCard(p) + '</div>' : '') +
       '<div>' +
@@ -1963,7 +2081,9 @@
   function viewGastos(p){
     var list = monthExpenses(p, uiMonth).slice().sort(function(a,b){ return b.date.localeCompare(a.date) || 0; });
     var spent = monthTotalSpent(p, uiMonth);
-    var remaining = p.budget - spent;
+    var entradas = p.incomes.reduce(function(s,x){
+      return s + (String(x.date).slice(0,7) === uiMonth ? (Number(x.amount)||0) : 0);
+    }, 0);
 
     var groups = {};
     var order = [];
@@ -1978,7 +2098,8 @@
         var idx = cat ? p.categories.indexOf(cat) : -1;
         return '<div class="exprow">' +
           '<span class="catdot" style="background:' + (cat ? catColor(cat.colorIdx!=null?cat.colorIdx:idx) : "var(--ink-faint)") + '"></span>' +
-          '<div class="meta"><div class="cname">' + esc(cat ? cat.name : "Sin categoría") + '</div>' +
+          '<div class="meta"><div class="cname">' + esc(cat ? cat.name : "Sin categoría") +
+            (e.recurringId ? ' <span class="tag-rec">recurrente</span>' : '') + '</div>' +
           (e.note ? '<div class="note">' + esc(e.note) + '</div>' : '') + '</div>' +
           '<div class="amt tnum">' + fmt(p, e.amount) + '</div>' +
           '<button class="icon-btn" data-delexp="' + e.id + '" title="Eliminar">✕</button>' +
@@ -1995,11 +2116,136 @@
       '</div>' +
       '<div class="card">' +
         '<div class="row"><div><div class="eyebrow">Gastado</div><div style="font-family:var(--font-mono); font-weight:700; font-size:1.15rem;">' + fmt(p,spent) + '</div></div>' +
-        '<div style="text-align:right;"><div class="eyebrow">Disponible</div><div style="font-family:var(--font-mono); font-weight:700; font-size:1.15rem; color:' + (remaining<0 ? "var(--danger)" : "var(--good)") + ';">' + fmt(p,remaining) + '</div></div></div>' +
+        '<div style="text-align:right;"><div class="eyebrow">Ingresos extra</div><div style="font-family:var(--font-mono); font-weight:700; font-size:1.15rem; color:' + (entradas > 0 ? "var(--good)" : "var(--ink-faint)") + ';">' + (entradas > 0 ? "+" : "") + fmt(p,entradas) + '</div></div></div>' +
       '</div>' +
-      '<button class="btn block" data-action="add-expense">+ Registrar gasto</button>' +
+      '<div class="fab-row" style="margin-top:0;">' +
+        '<button class="btn block" data-action="add-expense">+ Gasto</button>' +
+        '<button class="btn secondary block" data-action="add-income">+ Ingreso</button>' +
+      '</div>' +
       '<div>' + (order.length ? groupsHtml : '<div class="empty">No hay gastos registrados este mes.</div>') + '</div>' +
+
+      '<div>' +
+        '<div class="section-title">Ingresos extra</div>' +
+        '<div class="card">' + incomesList(p) + '</div>' +
+        '<p class="note-line">Regalos, ventas, un trabajo aparte: se suman a lo que tienes disponible en el periodo.</p>' +
+      '</div>' +
+
+      '<div>' +
+        '<div class="section-title">Gastos recurrentes</div>' +
+        '<div class="card">' + recurringList(p) + '</div>' +
+        '<button class="btn ghost block" style="margin-top:12px;" data-action="add-recurring">+ Añadir recurrente</button>' +
+        '<p class="note-line">Suscripciones y servicios que se repiten. Cuando llega su día, Cuadre los registra solo. Si borras uno ya registrado, no vuelve a aparecer ese periodo.</p>' +
+      '</div>' +
     '</div>';
+  }
+
+  function incomesList(p){
+    var items = p.incomes.filter(function(x){ return String(x.date).slice(0,7) === uiMonth; })
+                         .sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+    if(!items.length) return '<div class="empty">Sin ingresos extra este mes.</div>';
+    return items.map(function(x){
+      return '<div class="exprow">' +
+        '<span class="pill good" style="min-width:52px; text-align:center;">Entró</span>' +
+        '<div class="meta"><div class="cname">' + esc(x.note || "Ingreso") + '</div>' +
+          '<div class="note">' + dateShort(x.date) + '</div></div>' +
+        '<div class="amt tnum pos">+' + fmt(p, x.amount) + '</div>' +
+        '<button class="icon-btn" data-delincome="' + x.id + '" title="Eliminar">✕</button>' +
+      '</div>';
+    }).join("");
+  }
+
+  function recurringList(p){
+    if(!p.recurring.length) return '<div class="empty">Aún no tienes gastos recurrentes.</div>';
+    var ciclo = currentCycle(p);
+    var hoy = todayStr();
+    return p.recurring.map(function(r){
+      var cat = getCategory(p, r.categoryId);
+      var idx = cat ? p.categories.indexOf(cat) : -1;
+      var fecha = recurringDateInCycle(r, ciclo);
+      var yaVa = !!p.recurringDone[r.id + "|" + ciclo.desde];
+      var estado = yaVa ? "Registrado" : (fecha > hoy ? "Pendiente" : "Por registrar");
+      return '<div class="exprow">' +
+        '<span class="catdot" style="background:' + (cat ? catColor(cat.colorIdx!=null?cat.colorIdx:idx) : "var(--ink-faint)") + '"></span>' +
+        '<div class="meta"><div class="cname">' + esc(r.name) + '</div>' +
+          '<div class="note">día ' + clamp(Math.round(Number(r.day)||1),1,31) + ' · ' + esc(cat ? cat.name : "Sin categoría") + ' · ' + estado + '</div></div>' +
+        '<div class="amt tnum">' + fmt(p, r.amount) + '</div>' +
+        '<button class="icon-btn" data-delrec="' + r.id + '" title="Eliminar">✕</button>' +
+      '</div>';
+    }).join("");
+  }
+
+  function openAddIncome(){
+    var p = activeProfile();
+    openSheet(
+      '<div class="sheet-head"><h3>Registrar ingreso</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="incomeForm" class="stack">' +
+        '<label class="field">Fecha<input type="date" id="inDate" value="' + todayStr() + '" required></label>' +
+        '<label class="field">Monto<input type="text" id="inAmount" inputmode="decimal" placeholder="Ej. 200.000" required></label>' +
+        '<label class="field">¿De dónde vino?<input type="text" id="inNote" maxlength="50" placeholder="Ej. Regalo de cumpleaños"></label>' +
+        '<button class="btn block" type="submit">Guardar</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("incomeForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var amount = parseNum(document.getElementById("inAmount").value);
+      if(!amount || amount <= 0){
+        showMessageSheet("Falta el monto", "Escribe cuánto entró, por ejemplo 200.000.");
+        return;
+      }
+      p.incomes.push({
+        id: uid(),
+        date: document.getElementById("inDate").value || todayStr(),
+        amount: amount,
+        note: document.getElementById("inNote").value.trim()
+      });
+      saveDB();
+      uiMonth = p.incomes[p.incomes.length-1].date.slice(0,7);
+      closeSheet();
+      currentTab = "gastos";
+      renderApp();
+      showToast("Ingreso registrado.");
+    });
+  }
+
+  function openAddRecurring(){
+    var p = activeProfile();
+    if(!p.categories.length){
+      showMessageSheet("Sin categorías", "Primero crea al menos una categoría en Plan.");
+      return;
+    }
+    openSheet(
+      '<div class="sheet-head"><h3>Gasto recurrente</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<form id="recForm" class="stack">' +
+        '<label class="field">¿Qué es?<input type="text" id="recName" maxlength="40" placeholder="Ej. Gimnasio, Netflix, agua" required></label>' +
+        '<label class="field">Monto<input type="text" id="recAmount" inputmode="decimal" placeholder="Ej. 120.000" required></label>' +
+        '<label class="field">Categoría<select id="recCat">' + categoryOptions(p) + '</select></label>' +
+        '<label class="field">¿Qué día del mes se cobra?<input type="number" id="recDay" min="1" max="31" step="1" inputmode="numeric" value="1"></label>' +
+        '<button class="btn block" type="submit">Guardar</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("recForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var name = document.getElementById("recName").value.trim();
+      var amount = parseNum(document.getElementById("recAmount").value);
+      if(!name) return;
+      if(!amount || amount <= 0){
+        showMessageSheet("Falta el monto", "Escribe cuánto te cobran cada mes.");
+        return;
+      }
+      p.recurring.push({
+        id: uid(), name: name, amount: amount,
+        categoryId: document.getElementById("recCat").value,
+        day: clamp(Math.round(Number(document.getElementById("recDay").value) || 1), 1, 31)
+      });
+      applyRecurring(p);
+      saveDB();
+      closeSheet();
+      currentTab = "gastos";
+      renderApp();
+      showToast('"' + name + '" quedó como recurrente.');
+    });
   }
 
   function categoryOptions(p){
@@ -2683,6 +2929,33 @@
         else if(a === "edit-fx") openFxSheet();
         else if(a === "add-debt-debo") openAddDebt("debo");
         else if(a === "add-debt-prestado") openAddDebt("prestado");
+        else if(a === "add-income") openAddIncome();
+        else if(a === "add-recurring") openAddRecurring();
+        return;
+      }
+
+      var delinc = e.target.closest("[data-delincome]");
+      if(delinc){
+        p.incomes = p.incomes.filter(function(x){ return x.id !== delinc.dataset.delincome; });
+        saveDB(); renderView(); return;
+      }
+
+      var delrec = e.target.closest("[data-delrec]");
+      if(delrec){
+        var rid = delrec.dataset.delrec;
+        var rec = null;
+        for(var ri=0; ri<p.recurring.length; ri++){ if(p.recurring[ri].id === rid) rec = p.recurring[ri]; }
+        askConfirm({
+          title: "Quitar recurrente",
+          body: 'Dejará de registrarse solo cada periodo. Los gastos que ya registró se quedan en tu historial.',
+          confirmLabel: "Quitar",
+          danger: true,
+          onConfirm: function(){
+            p.recurring = p.recurring.filter(function(x){ return x.id !== rid; });
+            saveDB(); renderView();
+            showToast(rec ? '"' + rec.name + '" ya no es recurrente.' : "Listo.");
+          }
+        });
         return;
       }
 
