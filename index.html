@@ -428,6 +428,17 @@
   .pace-k{font-size:.82rem; color:var(--ink-soft); font-weight:600;}
   .pace-v{font-family:var(--font-mono); font-size:.85rem; font-weight:600; white-space:nowrap;}
 
+  .check-row{
+    display:flex; align-items:flex-start; gap:10px;
+    font-size:.85rem; color:var(--ink); font-weight:600;
+    cursor:pointer; padding:2px 0;
+  }
+  .check-row input[type="checkbox"]{
+    width:20px; height:20px; flex-shrink:0; margin:0;
+    accent-color:var(--accent); cursor:pointer;
+  }
+  .mueve{color:var(--warn); font-family:var(--font-body); font-weight:600;}
+
   .desglose{
     margin-top:12px; padding-top:10px; border-top:1px dashed var(--line);
     display:flex; flex-direction:column; gap:5px;
@@ -759,6 +770,10 @@
     if(!Array.isArray(p.goals)) p.goals = [];
     if(!Array.isArray(p.holdings)) p.holdings = [];
     if(!Array.isArray(p.debts)) p.debts = [];
+    // Prestar plata es plata que sale hoy; deber no siempre significa que entró.
+    p.debts.forEach(function(d){
+      if(d.affectsBudget == null) d.affectsBudget = (d.kind === "prestado");
+    });
     if(!p.budgetHistory || typeof p.budgetHistory !== "object") p.budgetHistory = {};
     if(!(Number(p.cycleStartDay) >= 1)) p.cycleStartDay = 1;
     if(!Array.isArray(p.incomes)) p.incomes = [];
@@ -1490,6 +1505,15 @@
     }, 0);
   }
 
+  // Deudas nacidas dentro del rango que sí movieron plata en su momento
+  function debtsStartedInRange(p, desde, hasta, kind){
+    return p.debts.reduce(function(s,d){
+      if(d.kind !== kind || !d.affectsBudget) return s;
+      var f = String(d.date || "");
+      return s + ((f >= desde && f <= hasta) ? (Number(d.amount)||0) : 0);
+    }, 0);
+  }
+
   // El balance del periodo en curso, con todo incluido
   function periodTotals(p){
     var c = currentCycle(p);
@@ -1498,13 +1522,18 @@
     var ingresos = incomesInRange(p, c.desde, c.hasta);
     var cobros = debtPaymentsInRange(p, c.desde, c.hasta, "prestado");
     var pagos = debtPaymentsInRange(p, c.desde, c.hasta, "debo");
-    var total = base + ingresos + cobros;   // todo lo que tienes para el periodo
-    var salidas = gastos + pagos;           // todo lo que se fue
+    // Lo que prestaste salió de tu bolsillo; lo que te prestaron en efectivo entró
+    var prestado = debtsStartedInRange(p, c.desde, c.hasta, "prestado");
+    var recibido = debtsStartedInRange(p, c.desde, c.hasta, "debo");
+
+    var total = base + ingresos + cobros + recibido;  // todo lo que tienes para el periodo
+    var salidas = gastos + pagos + prestado;          // todo lo que se fue
     return {
       ciclo: c, base: base,
       gastos: gastos, ingresos: ingresos, cobros: cobros, pagos: pagos,
+      prestado: prestado, recibido: recibido,
       total: total, salidas: salidas, disponible: total - salidas,
-      hayExtras: (ingresos > 0 || cobros > 0 || pagos > 0)
+      hayExtras: (ingresos > 0 || cobros > 0 || pagos > 0 || prestado > 0 || recibido > 0)
     };
   }
 
@@ -1541,7 +1570,9 @@
     var presupuesto = T.total; // presupuesto ya ajustado con ingresos y deudas
 
     var gastadoMes = T.salidas;
-    var gastadoHoy = spentInRange(p, hoyStr, hoyStr) + debtPaymentsInRange(p, hoyStr, hoyStr, "debo");
+    var gastadoHoy = spentInRange(p, hoyStr, hoyStr) +
+                     debtPaymentsInRange(p, hoyStr, hoyStr, "debo") +
+                     debtsStartedInRange(p, hoyStr, hoyStr, "prestado");
     var gastadoAntesDeHoy = gastadoMes - gastadoHoy;
 
     // Plan puro: repartir el presupuesto en partes iguales
@@ -1795,7 +1826,9 @@
           '<div class="desglose">' +
             '<div class="desg-row"><span>Presupuesto</span><span class="tnum">' + fmt(p, T.base) + '</span></div>' +
             (T.ingresos > 0 ? '<div class="desg-row pos"><span>+ Ingresos extra</span><span class="tnum">' + fmt(p, T.ingresos) + '</span></div>' : '') +
+            (T.recibido > 0 ? '<div class="desg-row pos"><span>+ Te prestaron</span><span class="tnum">' + fmt(p, T.recibido) + '</span></div>' : '') +
             (T.cobros > 0 ? '<div class="desg-row pos"><span>+ Te pagaron deudas</span><span class="tnum">' + fmt(p, T.cobros) + '</span></div>' : '') +
+            (T.prestado > 0 ? '<div class="desg-row neg"><span>− Prestaste</span><span class="tnum">' + fmt(p, T.prestado) + '</span></div>' : '') +
             (T.pagos > 0 ? '<div class="desg-row neg"><span>− Pagaste deudas</span><span class="tnum">' + fmt(p, T.pagos) + '</span></div>' : '') +
           '</div>'
         : '') +
@@ -1971,7 +2004,9 @@
           '<div class="progress" style="margin-top:8px;"><span style="width:' + pct + '%; background:' + (saldada ? "var(--good)" : "var(--accent)") + '"></span></div>' +
           '<div class="amounts row" style="margin-top:6px;">' +
             '<span>' + fmt(p, pagado) + ' de ' + fmt(p, total) + '</span>' +
-            '<span>' + (d.date ? dateShort(d.date) : "") + '</span>' +
+            '<span>' + (d.date ? dateShort(d.date) : "") +
+              (d.affectsBudget ? ' · <span class="mueve">' + (kind === "prestado" ? "salió de tu presupuesto" : "entró a tu presupuesto") + '</span>' : '') +
+            '</span>' +
           '</div>' +
           (saldada ? '' : '<button class="linkbtn" data-paydebt="' + d.id + '">Registrar ' + (kind === "debo" ? "pago" : "abono recibido") + '</button>') +
         '</div>';
@@ -2018,6 +2053,15 @@
         '<label class="field">Monto<input type="text" id="dAmount" inputmode="decimal" placeholder="Ej. 150.000" required></label>' +
         '<label class="field">¿Por qué? (opcional)<input type="text" id="dConcept" maxlength="60" placeholder="Ej. Préstamo, almuerzo"></label>' +
         '<label class="field">Fecha<input type="date" id="dDate" value="' + todayStr() + '"></label>' +
+        '<label class="check-row">' +
+          '<input type="checkbox" id="dAffects"' + (esDebo ? '' : ' checked') + '>' +
+          '<span>' + (esDebo ? 'Recibí esa plata en efectivo' : 'Esa plata salió de mi bolsillo ahora') + '</span>' +
+        '</label>' +
+        '<p class="note-line">' +
+          (esDebo
+            ? 'Márcalo solo si el dinero entró a tu bolsillo. Si te deben porque alguien pagó algo por ti, déjalo sin marcar.'
+            : 'Se resta de tu disponible y vuelve a sumarse cuando te paguen. Desmárcalo si ya registraste esa salida como gasto, para no contarla dos veces.') +
+        '</p>' +
         '<button class="btn block" type="submit">Guardar</button>' +
       '</form>'
     );
@@ -2035,6 +2079,7 @@
         id: uid(), kind: kind, person: person, amount: amount,
         concept: document.getElementById("dConcept").value.trim(),
         date: document.getElementById("dDate").value || todayStr(),
+        affectsBudget: document.getElementById("dAffects").checked,
         payments: []
       });
       saveDB();
