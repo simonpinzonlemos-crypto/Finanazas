@@ -450,6 +450,10 @@
   .desg-row .tnum{font-family:var(--font-mono); font-weight:600;}
   .desg-row.pos{color:var(--good);}
   .desg-row.neg{color:var(--danger);}
+  .desg-row.total{
+    margin-top:4px; padding-top:7px; border-top:1px solid var(--line);
+    color:var(--ink); font-weight:700; font-size:.82rem;
+  }
   .ajustado{
     display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
     background:var(--accent-soft); color:var(--accent);
@@ -1514,6 +1518,17 @@
     }, 0);
   }
 
+  // Lo que realmente salió de tu bolsillo en un rango.
+  // Las deudas se netean: prestar resta, y cuando te devuelven, esa salida se
+  // deshace — así el disponible se recupera sin inflar el presupuesto total.
+  function netOutflowInRange(p, desde, hasta){
+    return spentInRange(p, desde, hasta)
+         + debtPaymentsInRange(p, desde, hasta, "debo")      // pagaste lo que debías
+         + debtsStartedInRange(p, desde, hasta, "prestado")  // prestaste
+         - debtPaymentsInRange(p, desde, hasta, "prestado")  // te devolvieron
+         - debtsStartedInRange(p, desde, hasta, "debo");     // te prestaron en efectivo
+  }
+
   // El balance del periodo en curso, con todo incluido
   function periodTotals(p){
     var c = currentCycle(p);
@@ -1522,12 +1537,12 @@
     var ingresos = incomesInRange(p, c.desde, c.hasta);
     var cobros = debtPaymentsInRange(p, c.desde, c.hasta, "prestado");
     var pagos = debtPaymentsInRange(p, c.desde, c.hasta, "debo");
-    // Lo que prestaste salió de tu bolsillo; lo que te prestaron en efectivo entró
     var prestado = debtsStartedInRange(p, c.desde, c.hasta, "prestado");
     var recibido = debtsStartedInRange(p, c.desde, c.hasta, "debo");
 
-    var total = base + ingresos + cobros + recibido;  // todo lo que tienes para el periodo
-    var salidas = gastos + pagos + prestado;          // todo lo que se fue
+    // El total solo crece con plata que es tuya de verdad
+    var total = base + ingresos;
+    var salidas = netOutflowInRange(p, c.desde, c.hasta);
     return {
       ciclo: c, base: base,
       gastos: gastos, ingresos: ingresos, cobros: cobros, pagos: pagos,
@@ -1570,9 +1585,7 @@
     var presupuesto = T.total; // presupuesto ya ajustado con ingresos y deudas
 
     var gastadoMes = T.salidas;
-    var gastadoHoy = spentInRange(p, hoyStr, hoyStr) +
-                     debtPaymentsInRange(p, hoyStr, hoyStr, "debo") +
-                     debtsStartedInRange(p, hoyStr, hoyStr, "prestado");
+    var gastadoHoy = netOutflowInRange(p, hoyStr, hoyStr);
     var gastadoAntesDeHoy = gastadoMes - gastadoHoy;
 
     // Plan puro: repartir el presupuesto en partes iguales
@@ -1584,7 +1597,7 @@
     var quedaHoy = cupoHoy - gastadoHoy;
 
     var semana = weekRange();
-    var gastadoSemana = spentInRange(p, semana.desde, semana.hasta);
+    var gastadoSemana = netOutflowInRange(p, semana.desde, semana.hasta);
     var cupoSemana = cupoHoy * 7;
 
     // ¿Vas ahorrando? Comparar con lo que "tocaba" llevar gastado a esta altura
@@ -1819,17 +1832,18 @@
       '<div class="card">' +
         '<div class="eyebrow">' + (ciclo.personalizado ? cycleLabel(ciclo) : monthLabel(thisMonth)) + '</div>' +
         '<div class="headline tnum">' + fmt(p, remaining) + '</div>' +
-        '<div class="sub">disponible de ' + fmt(p, T.total) + (T.hayExtras ? ' <span class="ajustado">ajustado</span>' : '') + '</div>' +
+        '<div class="sub">disponible de ' + fmt(p, T.total) + (T.ingresos > 0 ? ' <span class="ajustado">con ingresos extra</span>' : '') + '</div>' +
         '<div class="progress" style="margin-top:12px; height:10px;"><span style="width:' + Math.min(overallPct,100) + '%; background:' + (overallState==="danger"?"var(--danger)":overallState==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
         '<div class="row" style="margin-top:8px; font-size:.78rem; color:var(--ink-soft);"><span>Gastado: ' + fmt(p,spent) + '</span><span>' + Math.round(overallPct) + '% ' + (ciclo.personalizado ? "del periodo" : "del mes") + '</span></div>' +
         (T.hayExtras ?
           '<div class="desglose">' +
-            '<div class="desg-row"><span>Presupuesto</span><span class="tnum">' + fmt(p, T.base) + '</span></div>' +
-            (T.ingresos > 0 ? '<div class="desg-row pos"><span>+ Ingresos extra</span><span class="tnum">' + fmt(p, T.ingresos) + '</span></div>' : '') +
-            (T.recibido > 0 ? '<div class="desg-row pos"><span>+ Te prestaron</span><span class="tnum">' + fmt(p, T.recibido) + '</span></div>' : '') +
-            (T.cobros > 0 ? '<div class="desg-row pos"><span>+ Te pagaron deudas</span><span class="tnum">' + fmt(p, T.cobros) + '</span></div>' : '') +
+            '<div class="desg-row"><span>Presupuesto del periodo</span><span class="tnum">' + fmt(p, T.total) + '</span></div>' +
+            (T.gastos > 0 ? '<div class="desg-row neg"><span>− Gastos</span><span class="tnum">' + fmt(p, T.gastos) + '</span></div>' : '') +
             (T.prestado > 0 ? '<div class="desg-row neg"><span>− Prestaste</span><span class="tnum">' + fmt(p, T.prestado) + '</span></div>' : '') +
             (T.pagos > 0 ? '<div class="desg-row neg"><span>− Pagaste deudas</span><span class="tnum">' + fmt(p, T.pagos) + '</span></div>' : '') +
+            (T.cobros > 0 ? '<div class="desg-row pos"><span>+ Te devolvieron</span><span class="tnum">' + fmt(p, T.cobros) + '</span></div>' : '') +
+            (T.recibido > 0 ? '<div class="desg-row pos"><span>+ Te prestaron</span><span class="tnum">' + fmt(p, T.recibido) + '</span></div>' : '') +
+            '<div class="desg-row total"><span>Te queda</span><span class="tnum">' + fmt(p, T.disponible) + '</span></div>' +
           '</div>'
         : '') +
       '</div>' +
