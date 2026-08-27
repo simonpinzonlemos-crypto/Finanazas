@@ -412,6 +412,14 @@
     font-size:.75rem; color:var(--ink-soft);
   }
   .kind-fields{gap:12px;}
+  .hold-acciones{display:flex; gap:16px; margin-top:8px;}
+  .hold-acciones .linkbtn{margin-top:0;}
+  .mov-tag{
+    font-family:var(--font-body); font-size:.68rem; font-weight:700;
+    padding:1px 5px; border-radius:999px; background:var(--surface);
+  }
+  .mov-tag.pos{color:var(--good);}
+  .mov-tag.neg{color:var(--danger);}
   .hold-native{
     font-size:.72rem; color:var(--ink-faint); font-family:var(--font-mono);
     white-space:nowrap; margin-top:1px;
@@ -880,14 +888,19 @@
   }
   // ¿El valor lo escribiste tú a mano?
   function cdtManual(h){ return Number(h.currentValue) > 0; }
+  // Abonos y retiros que le has hecho al papel (positivo entra, negativo sale)
+  function movesSum(h){
+    if(!h || !Array.isArray(h.movements)) return 0;
+    return h.movements.reduce(function(s,m){ return s + (Number(m.amount)||0); }, 0);
+  }
 
   // Valor en la moneda propia del papel (sin convertir)
   function holdingNativeValue(h){
     if(!h) return 0;
     if(h.kind === "cuenta") return Number(h.amount) || 0;
     if(h.kind === "cdt"){
-      if(cdtManual(h)) return Number(h.currentValue);
-      return cdtValueAt(h, cdtElapsedDays(h));
+      var base = cdtManual(h) ? Number(h.currentValue) : cdtValueAt(h, cdtElapsedDays(h));
+      return base + movesSum(h);
     }
     if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.price) || 0);
     return 0;
@@ -895,7 +908,7 @@
   function holdingNativeCost(h){
     if(!h) return 0;
     if(h.kind === "cuenta") return Number(h.amount) || 0;
-    if(h.kind === "cdt") return Number(h.principal) || 0;
+    if(h.kind === "cdt") return (Number(h.principal) || 0) + movesSum(h);
     if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.buyPrice) || Number(h.price) || 0);
     return 0;
   }
@@ -1892,6 +1905,30 @@
     return {clase:"warn", izq: Math.round((asignado/b)*100) + "% repartido", der:"Te pasaste " + fmt(p, -resto)};
   }
 
+  function cycleNoteText(p){
+    var c = currentCycle(p);
+    return c.personalizado
+      ? 'Tu periodo va del ' + cycleLabel(c) + '. Útil si te pagan un día fijo.'
+      : 'Déjalo en 1 si cuentas por mes calendario. Si te pagan el 14, pon 14.';
+  }
+  function splitBlockHtml(p){
+    if(!(Number(p.budget) > 0)) return "";
+    var r = paceInfo(p);
+    return '<div class="split-row">' +
+        '<div class="split-cell"><span class="split-k">Por semana</span><span class="split-v tnum">' + fmt(p, r.planSemanal) + '</span></div>' +
+        '<div class="split-cell"><span class="split-k">Por día</span><span class="split-v tnum">' + fmt(p, r.planDiario) + '</span></div>' +
+      '</div>' +
+      '<p class="note-line">Tu presupuesto repartido en partes iguales entre los ' + r.dias + ' días del periodo.</p>';
+  }
+  // Refresca solo los textos que dependen del día de corte, sin rehacer la vista
+  // (si se rehiciera, el campo perdería lo que estás escribiendo).
+  function refreshCycleTexts(p){
+    var nota = document.getElementById("cycle-note");
+    if(nota) nota.textContent = cycleNoteText(p);
+    var bloque = document.getElementById("split-block");
+    if(bloque) bloque.innerHTML = splitBlockHtml(p);
+  }
+
   function viewPresupuesto(p){
     var estado = budgetStatus(p);
 
@@ -1919,20 +1956,8 @@
           '<label class="corte-label" for="cycle-day">Mi mes empieza el día</label>' +
           '<input id="cycle-day" type="number" min="1" max="31" step="1" inputmode="numeric" value="' + cycleStartDay(p) + '">' +
         '</div>' +
-        '<p class="note-line">' +
-          (currentCycle(p).personalizado
-            ? 'Tu periodo va del ' + cycleLabel(currentCycle(p)) + '. Útil si te pagan un día fijo.'
-            : 'Déjalo en 1 si cuentas por mes calendario. Si te pagan el 14, pon 14.') +
-        '</p>' +
-
-        (Number(p.budget) > 0 ? (function(){
-          var r = paceInfo(p);
-          return '<div class="split-row">' +
-            '<div class="split-cell"><span class="split-k">Por semana</span><span class="split-v tnum">' + fmt(p, r.planSemanal) + '</span></div>' +
-            '<div class="split-cell"><span class="split-k">Por día</span><span class="split-v tnum">' + fmt(p, r.planDiario) + '</span></div>' +
-          '</div>' +
-          '<p class="note-line">Tu presupuesto repartido en partes iguales entre los ' + r.dias + ' días del periodo.</p>';
-        })() : "") +
+        '<p class="note-line" id="cycle-note">' + cycleNoteText(p) + '</p>' +
+        '<div id="split-block">' + splitBlockHtml(p) + '</div>' +
       '</div>' +
       '<div>' +
         '<div class="section-title">Reparto por categoría</div>' +
@@ -2506,9 +2531,10 @@
               ? '<div><span class="hold-k">Lleva</span><span class="hold-v">' + elapsed + ' días</span></div>'
               : '<div><span class="hold-k">' + (Math.max(0, cdtTermDays(h) - elapsed) > 0 ? "Faltan" : "Estado") + '</span><span class="hold-v">' + (Math.max(0, cdtTermDays(h) - elapsed) > 0 ? Math.max(0, cdtTermDays(h) - elapsed) + " días" : "Vencido") + '</span></div>');
 
+        var movs = movesSum(h);
         detalle =
           '<div class="hold-grid">' +
-            '<div><span class="hold-k">Capital</span><span class="hold-v tnum">' + fmt(p, h.principal) + '</span></div>' +
+            '<div><span class="hold-k">Capital</span><span class="hold-v tnum">' + fmt(p, h.principal) + (movs !== 0 ? ' <span class="mov-tag ' + (movs > 0 ? "pos" : "neg") + '">' + (movs > 0 ? "+" : "") + fmt(p, movs) + '</span>' : '') + '</span></div>' +
             '<div><span class="hold-k">Tasa</span><span class="hold-v tnum">' + (Number(h.rate) > 0 ? fmtPct(Number(h.rate), 2) + '% E.A.' : '—') + '</span></div>' +
             '<div><span class="hold-k">' + (interesHoy >= 0 ? "Ganancia a hoy" : "Diferencia") + '</span><span class="hold-v tnum ' + (interesHoy >= 0 ? "pos" : "neg") + '">' + (interesHoy >= 0 ? "+" : "") + fmt(p, interesHoy) + '</span></div>' +
             filaDerecha +
@@ -2517,8 +2543,12 @@
             (manual
               ? 'Valor ajustado por ti. Bórralo al editar para volver al cálculo automático.'
               : (abierto
-                  ? 'Sin plazo fijo: sigue creciendo mientras esté abierto. Puedes ajustar el valor a mano cuando quieras.'
-                  : 'Al vencer (' + (Number(h.termMonths)||0) + ' meses): <b class="tnum">' + fmt(p, cdtValueAt(h, cdtTermDays(h))) + '</b> · ganas <b class="tnum">' + fmt(p, cdtValueAt(h, cdtTermDays(h)) - (Number(h.principal)||0)) + '</b>')) +
+                  ? 'Sin plazo fijo: sigue creciendo mientras esté abierto.'
+                  : 'Al vencer (' + (Number(h.termMonths)||0) + ' meses): <b class="tnum">' + fmt(p, cdtValueAt(h, cdtTermDays(h)) + movs) + '</b> · ganas <b class="tnum">' + fmt(p, cdtValueAt(h, cdtTermDays(h)) - (Number(h.principal)||0)) + '</b>')) +
+          '</div>' +
+          '<div class="hold-acciones">' +
+            '<button class="linkbtn" data-movehold="' + h.id + '" data-signo="1">+ Abonar</button>' +
+            '<button class="linkbtn" data-movehold="' + h.id + '" data-signo="-1">− Retirar</button>' +
           '</div>';
       } else if(h.kind === "accion"){
         var shares = Number(h.shares) || 0;
@@ -2681,6 +2711,44 @@
       closeSheet();
       currentTab = "ahorros";
       renderApp();
+    });
+  }
+
+  // Abonar o retirar plata de un CDT o cuenta a término
+  function openMoveHolding(id, signo){
+    var p = activeProfile();
+    var h = null;
+    for(var i=0;i<p.holdings.length;i++){ if(p.holdings[i].id === id) h = p.holdings[i]; }
+    if(!h) return;
+    var esAbono = signo > 0;
+    openSheet(
+      '<div class="sheet-head"><h3>' + (esAbono ? "Abonar a" : "Retirar de") + ' ' + esc(h.name) + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">Valor actual: <b>' + fmtSmart(p, holdingNativeValue(h)) + '</b></p>' +
+      '<form id="moveForm" class="stack" style="margin-top:12px;">' +
+        '<label class="field">Monto<input type="text" id="mvAmount" inputmode="decimal" placeholder="Ej. 500.000" required></label>' +
+        '<label class="field">Fecha<input type="date" id="mvDate" value="' + todayStr() + '"></label>' +
+        '<button class="btn block" type="submit">' + (esAbono ? "Abonar" : "Retirar") + '</button>' +
+      '</form>' +
+      '<p class="note-line">Se suma o se resta al valor de este ahorro. El interés se sigue calculando sobre el capital inicial.</p>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("moveForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var monto = parseNum(document.getElementById("mvAmount").value);
+      if(!monto || monto <= 0){
+        showMessageSheet("Falta el monto", "Escribe cuánto vas a " + (esAbono ? "abonar" : "retirar") + ".");
+        return;
+      }
+      if(!Array.isArray(h.movements)) h.movements = [];
+      h.movements.push({
+        id: uid(),
+        date: document.getElementById("mvDate").value || todayStr(),
+        amount: esAbono ? monto : -monto
+      });
+      saveDB();
+      closeSheet();
+      renderView();
+      showToast((esAbono ? "Abonaste " : "Retiraste ") + fmt(p, monto) + ". Ahora vale " + fmtSmart(p, holdingNativeValue(h)) + ".");
     });
   }
 
@@ -3081,6 +3149,12 @@
         return;
       }
 
+      var movehold = e.target.closest("[data-movehold]");
+      if(movehold){
+        openMoveHolding(movehold.dataset.movehold, Number(movehold.dataset.signo));
+        return;
+      }
+
       var edithold = e.target.closest("[data-edithold]");
       if(edithold){
         var hid = edithold.dataset.edithold;
@@ -3127,14 +3201,13 @@
 
     view.oninput = function(e){
       if(e.target.id === "cycle-day"){
-        var dia = Math.round(Number(e.target.value) || 1);
+        var crudo = String(e.target.value).trim();
+        if(crudo === "") return;            // te dejamos borrar para reescribir
+        var dia = Math.round(Number(crudo));
+        if(!(dia >= 1)) return;
         p.cycleStartDay = clamp(dia, 1, 31);
         saveDB();
-        renderView();
-        requestAnimationFrame(function(){
-          var campo = document.getElementById("cycle-day");
-          if(campo){ campo.focus(); campo.select(); }
-        });
+        refreshCycleTexts(p);
         return;
       }
       if(e.target.id === "budget-input"){
@@ -3161,6 +3234,14 @@
     };
 
     view.onchange = function(e){
+      // Al salir del campo dejamos el día ya normalizado (1–31)
+      if(e.target.id === "cycle-day"){
+        var dia = Math.round(Number(e.target.value) || 1);
+        p.cycleStartDay = clamp(dia, 1, 31);
+        saveDB();
+        renderView();
+        return;
+      }
       if(e.target.id === "importFile"){
         var file = e.target.files && e.target.files[0];
         if(file) handleImportFile(file);
