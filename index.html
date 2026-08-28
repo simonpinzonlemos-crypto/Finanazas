@@ -982,7 +982,7 @@
   function showMessageSheet(title, body){
     openSheet(
       '<div class="sheet-head"><h3>' + esc(title) + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
-      '<p class="sub">' + esc(body) + '</p>' +
+      '<p class="sub" style="white-space:pre-line;">' + esc(body) + '</p>' +
       '<button class="btn block" id="msgOk" style="margin-top:14px;">Entendido</button>'
     );
     document.getElementById("closeSheet").addEventListener("click", closeSheet);
@@ -2898,23 +2898,86 @@
 
   // Trae el precio de mercado. Solo funciona donde la página puede salir a
   // internet (archivo propio o sitio publicado), no dentro del visor de Claude.
+  // ---------- consultas al mercado ----------
+  // El navegador no deja que esta página lea una API de otro dominio salvo que
+  // esa API lo permita. Por eso se intenta primero derecho y, si lo corta, se
+  // pasa por un puente público. Si un puente está caído o cambió de formato,
+  // se prueba el siguiente en vez de rendirse.
+  var PUENTES = [
+    function(u){ return u; },
+    function(u){ return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); },
+    function(u){ return "https://corsproxy.io/?url=" + encodeURIComponent(u); },
+    function(u){ return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); }
+  ];
+  var ultimoFalloRed = "";
+
+  function fetchJson(url, ms){
+    var ctrl = new AbortController();
+    var corte = setTimeout(function(){ ctrl.abort(); }, ms || 12000);
+    return fetch(url, { signal: ctrl.signal, cache: "no-store" })
+      .then(function(r){
+        if(!r.ok) throw new Error("respuesta " + r.status);
+        return r.text();
+      })
+      .then(function(t){
+        try{ return JSON.parse(t); }
+        catch(e){ throw new Error("respuesta ilegible"); }
+      })
+      .finally(function(){ clearTimeout(corte); });
+  }
+
+  // Recorre los puentes hasta que uno entregue algo que sirva. "leer" saca el
+  // dato del JSON y revienta si no viene, así un puente que responde basura no
+  // cuenta como éxito y se pasa al siguiente.
+  function fetchPorPuentes(url, leer){
+    var i = 0, motivos = [];
+    function intentar(){
+      if(i >= PUENTES.length){
+        ultimoFalloRed = motivos.join(" · ");
+        throw new Error(ultimoFalloRed || "sin conexión");
+      }
+      var arma = PUENTES[i++];
+      return fetchJson(arma(url), 12000)
+        .then(leer)
+        .catch(function(e){
+          motivos.push("intento " + i + ": " + (e && e.message ? e.message : "falló"));
+          return intentar();
+        });
+    }
+    return Promise.resolve().then(intentar);
+  }
+
   function fetchQuote(ticker){
     var destino = "https://query1.finance.yahoo.com/v8/finance/chart/" +
       encodeURIComponent(ticker) + "?interval=1d&range=1d";
-    var url = "https://corsproxy.io/?" + encodeURIComponent(destino);
-    var ctrl = new AbortController();
-    var corte = setTimeout(function(){ ctrl.abort(); }, 12000);
-    return fetch(url, { signal: ctrl.signal })
-      .then(function(r){
-        clearTimeout(corte);
-        if(!r.ok) throw new Error("no encontrado");
-        return r.json();
-      })
+    return fetchPorPuentes(destino, function(j){
+      var res = j && j.chart && j.chart.result && j.chart.result[0];
+      var meta = res && res.meta;
+      var precio = meta && meta.regularMarketPrice;
+      if(typeof precio !== "number" || !isFinite(precio)){
+        var err = j && j.chart && j.chart.error;
+        throw new Error(err && err.description ? err.description : "sin precio");
+      }
+      return { price: precio, currency: (meta.currency || "").toUpperCase() };
+    });
+  }
+
+  // Cuánto vale una moneda en otra. Se pregunta primero a un servicio de
+  // divisas que sí deja consultarlo derecho desde el navegador; si no responde,
+  // se cae a la cotización del par en Yahoo, que sí necesita puente.
+  function fetchRate(desde, hasta){
+    var a = String(desde).toUpperCase(), b = String(hasta).toUpperCase();
+    return fetchJson("https://open.er-api.com/v6/latest/" + encodeURIComponent(a), 12000)
       .then(function(j){
-        var meta = j && j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
-        var precio = meta && meta.regularMarketPrice;
-        if(typeof precio !== "number") throw new Error("sin precio");
-        return { price: precio, currency: (meta.currency || "").toUpperCase() };
+        var r = j && j.rates && Number(j.rates[b]);
+        if(!(r > 0)) throw new Error("sin tasa");
+        return r;
+      })
+      .catch(function(){
+        return fetchQuote(a + b + "=X").then(function(q){
+          if(!(q.price > 0)) throw new Error("sin tasa");
+          return q.price;
+        });
       });
   }
 
@@ -2948,7 +3011,8 @@
         showMessageSheet("No se pudieron traer los precios",
           "Revisa tu conexión y que los símbolos sean correctos (por ejemplo AAPL). " +
           "Dentro del visor de Claude esta consulta está bloqueada: funciona al abrir la app desde tu archivo o desde tu sitio publicado. " +
-          "Mientras tanto puedes escribir el precio a mano editando la acción.");
+          "Mientras tanto puedes escribir el precio a mano editando la acción." +
+          (ultimoFalloRed ? "\n\nDetalle técnico: " + ultimoFalloRed : ""));
       }
     });
   }
@@ -2960,8 +3024,8 @@
     var base = String(p.currencyCode || "COP").toUpperCase();
     var ok = true;
     return Promise.all(monedas.map(function(c){
-      return fetchQuote(c + base + "=X")
-        .then(function(q){ p.fxRates[c] = q.price; })
+      return fetchRate(c, base)
+        .then(function(r){ p.fxRates[c] = r; })
         .catch(function(){ ok = false; });
     })).then(function(){
       if(ok) p.fxUpdatedAt = sello || "";
