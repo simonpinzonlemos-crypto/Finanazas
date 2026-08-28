@@ -779,7 +779,7 @@
   function showMessageSheet(title, body){
     openSheet(
       '<div class="sheet-head"><h3>' + esc(title) + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
-      '<p class="sub">' + esc(body) + '</p>' +
+      '<p class="sub" style="white-space:pre-line;">' + esc(body) + '</p>' +
       '<button class="btn block" id="msgOk" style="margin-top:14px;">Entendido</button>'
     );
     document.getElementById("closeSheet").addEventListener("click", closeSheet);
@@ -1858,35 +1858,88 @@
     });
   }
 
-  // Trae el precio de mercado. Solo funciona donde la página puede salir a
-  // internet (archivo propio o sitio publicado), no dentro del visor de Claude.
+  // ---------- consultas al mercado ----------
+  // El navegador no deja que esta página lea directamente una API de otro
+  // dominio salvo que esa API lo permita. Por eso se intenta primero derecho
+  // y, si el navegador lo corta, se pasa por un puente público. Si un puente
+  // está caído o cambió, se prueba el siguiente en vez de rendirse.
+  var PUENTES = [
+    function(u){ return u; },
+    function(u){ return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); },
+    function(u){ return "https://corsproxy.io/?url=" + encodeURIComponent(u); },
+    function(u){ return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); }
+  ];
+  var ultimoFalloRed = "";
+
+  function fetchJson(url, ms){
+    var ctrl = new AbortController();
+    var corte = setTimeout(function(){ ctrl.abort(); }, ms || 12000);
+    return fetch(url, { signal: ctrl.signal, cache: "no-store" })
+      .then(function(r){
+        if(!r.ok) throw new Error("respuesta " + r.status);
+        return r.text();
+      })
+      .then(function(t){
+        try{ return JSON.parse(t); }
+        catch(e){ throw new Error("respuesta ilegible"); }
+      })
+      .finally(function(){ clearTimeout(corte); });
+  }
+
+  // Recorre los puentes en orden hasta que uno entregue algo que sirva.
+  // "leer" saca el dato del JSON y revienta si no viene: así un puente que
+  // responde basura no cuenta como éxito y se pasa al siguiente.
+  function fetchPorPuentes(url, leer){
+    var i = 0, motivos = [];
+    function intentar(){
+      if(i >= PUENTES.length){
+        ultimoFalloRed = motivos.join(" · ");
+        throw new Error(ultimoFalloRed || "sin conexión");
+      }
+      var arma = PUENTES[i++];
+      return fetchJson(arma(url), 12000)
+        .then(leer)
+        .catch(function(e){
+          motivos.push("intento " + i + ": " + (e && e.message ? e.message : "falló"));
+          return intentar();
+        });
+    }
+    return Promise.resolve().then(intentar);
+  }
+
+  // Precio de mercado de una acción. El endpoint de gráficas de Yahoo es el
+  // que sigue abierto sin credenciales.
   function fetchQuote(ticker){
     var destino = "https://query1.finance.yahoo.com/v8/finance/chart/" +
       encodeURIComponent(ticker) + "?interval=1d&range=1d";
-    var url = "https://corsproxy.io/?" + encodeURIComponent(destino);
-    var ctrl = new AbortController();
-    var corte = setTimeout(function(){ ctrl.abort(); }, 12000);
-    return fetch(url, { signal: ctrl.signal })
-      .then(function(r){
-        clearTimeout(corte);
-        if(!r.ok) throw new Error("no encontrado");
-        return r.json();
-      })
-      .then(function(j){
-        var meta = j && j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
-        var precio = meta && meta.regularMarketPrice;
-        if(typeof precio !== "number") throw new Error("sin precio");
-        return { price: precio, currency: (meta.currency || "").toUpperCase() };
-      });
+    return fetchPorPuentes(destino, function(j){
+      var res = j && j.chart && j.chart.result && j.chart.result[0];
+      var meta = res && res.meta;
+      var precio = meta && meta.regularMarketPrice;
+      if(typeof precio !== "number" || !isFinite(precio)){
+        var err = j && j.chart && j.chart.error;
+        throw new Error(err && err.description ? err.description : "sin precio");
+      }
+      return { price: precio, currency: (meta.currency || "").toUpperCase() };
+    });
   }
 
-  // La tasa del dólar sale del mismo servicio: USDCOP=X cotiza cuántos pesos
-  // vale un dólar. Si el perfil usa otra moneda, el usuario la pone a mano.
+  // La tasa del dólar. Se pregunta primero a un servicio de divisas que sí
+  // deja consultarlo derecho desde el navegador; si no responde, se cae a la
+  // cotización USD/COP de Yahoo por los puentes.
   function fetchUsdRate(){
-    return fetchQuote("USDCOP=X").then(function(q){
-      if(!(q.price > 0)) throw new Error("sin tasa");
-      return q.price;
-    });
+    return fetchJson("https://open.er-api.com/v6/latest/USD", 12000)
+      .then(function(j){
+        var r = j && j.rates && j.rates.COP;
+        if(!(r > 0)) throw new Error("sin tasa");
+        return r;
+      })
+      .catch(function(){
+        return fetchQuote("USDCOP=X").then(function(q){
+          if(!(q.price > 0)) throw new Error("sin tasa");
+          return q.price;
+        });
+      });
   }
 
   function refreshPrices(){
@@ -1902,7 +1955,16 @@
 
     var tareas = acciones.map(function(h){
       return fetchQuote(h.ticker)
-        .then(function(q){ h.price = q.price; h.quoteCurrency = q.currency; h.updatedAt = hoy; listos++; })
+        .then(function(q){
+          h.price = q.price;
+          h.quoteCurrency = q.currency;
+          h.updatedAt = hoy;
+          // El precio llega en la moneda de la bolsa, no en la que estaba
+          // marcada la acción. Mandar la del mercado evita que un precio en
+          // dólares se sume como pesos (o al revés) y dañe el total.
+          if(q.currency) h.currency = (q.currency === "USD") ? "USD" : "LOCAL";
+          listos++;
+        })
         .catch(function(){ fallidos.push(h.ticker); });
     });
     // De paso se refresca el dólar, para que el total en pesos quede al día.
@@ -1923,7 +1985,8 @@
         showMessageSheet("No se pudieron traer los precios",
           "Revisa tu conexión y que los símbolos sean correctos (por ejemplo AAPL). " +
           "Dentro del visor de Claude esta consulta está bloqueada: funciona al abrir la app desde tu archivo o desde tu sitio publicado. " +
-          "Mientras tanto puedes escribir el precio a mano editando la acción.");
+          "Mientras tanto puedes escribir el precio a mano editando la acción." +
+          (ultimoFalloRed ? "\n\nDetalle técnico: " + ultimoFalloRed : ""));
       }
     });
   }
