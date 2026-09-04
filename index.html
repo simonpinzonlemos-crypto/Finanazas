@@ -412,6 +412,11 @@
     font-size:.75rem; color:var(--ink-soft);
   }
   .kind-fields{gap:12px;}
+  .pasos{
+    margin:0 0 14px; padding-left:20px;
+    font-size:.82rem; color:var(--ink-soft); line-height:1.5;
+  }
+  .pasos li{margin-bottom:4px;}
   .hold-acciones{display:flex; gap:16px; margin-top:8px;}
   .hold-acciones .linkbtn{margin-top:0;}
   .mov-tag{
@@ -982,7 +987,7 @@
   function showMessageSheet(title, body){
     openSheet(
       '<div class="sheet-head"><h3>' + esc(title) + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
-      '<p class="sub" style="white-space:pre-line;">' + esc(body) + '</p>' +
+      '<p class="sub">' + esc(body) + '</p>' +
       '<button class="btn block" id="msgOk" style="margin-top:14px;">Entendido</button>'
     );
     document.getElementById("closeSheet").addEventListener("click", closeSheet);
@@ -1225,7 +1230,17 @@
   }
 
   function buildBackupJson(){
-    return JSON.stringify({ app: "cuadre", version: 1, exportedAt: new Date().toISOString(), active: DB.active, profiles: DB.profiles }, null, 2);
+    // La clave de precios es una credencial: se queda en este dispositivo y no
+    // se copia al respaldo, por si alguna vez compartes el archivo.
+    var limpios = {};
+    Object.keys(DB.profiles).forEach(function(id){
+      var copia = {};
+      Object.keys(DB.profiles[id]).forEach(function(k){
+        if(k !== "finnhubKey") copia[k] = DB.profiles[id][k];
+      });
+      limpios[id] = copia;
+    });
+    return JSON.stringify({ app: "cuadre", version: 1, exportedAt: new Date().toISOString(), active: DB.active, profiles: limpios }, null, 2);
   }
   function backupFilename(){ return "cuadre-respaldo-" + todayStr() + ".json"; }
 
@@ -2662,6 +2677,11 @@
           '<button class="btn block" data-action="add-holding">+ Agregar tipo</button>' +
           (hayAcciones ? '<button class="btn secondary block" data-action="refresh-prices">Actualizar precios</button>' : '') +
         '</div>' +
+        (hayAcciones ? '<div style="display:flex; flex-direction:column; align-items:flex-start;">' +
+          '<button class="linkbtn" data-action="api-key">' +
+            (finnhubKey(p) ? 'Clave de precios configurada · cambiarla' : 'Configurar clave para traer precios') +
+          '</button>' +
+        '</div>' : '') +
       '</div>' +
 
       '<div>' +
@@ -2896,89 +2916,100 @@
     });
   }
 
-  // Trae el precio de mercado. Solo funciona donde la página puede salir a
-  // internet (archivo propio o sitio publicado), no dentro del visor de Claude.
-  // ---------- consultas al mercado ----------
-  // El navegador no deja que esta página lea una API de otro dominio salvo que
-  // esa API lo permita. Por eso se intenta primero derecho y, si lo corta, se
-  // pasa por un puente público. Si un puente está caído o cambió de formato,
-  // se prueba el siguiente en vez de rendirse.
-  var PUENTES = [
-    function(u){ return u; },
-    function(u){ return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); },
-    function(u){ return "https://corsproxy.io/?url=" + encodeURIComponent(u); },
-    function(u){ return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); }
-  ];
-  var ultimoFalloRed = "";
+  // ---------- precios de bolsa (Finnhub) ----------
+  // La clave es tuya y se guarda solo en este navegador, nunca en el código.
+  function finnhubKey(p){ return String(p.finnhubKey || "").trim(); }
 
-  function fetchJson(url, ms){
+  // Solo funciona donde la página puede salir a internet (tu archivo o tu sitio
+  // publicado), no dentro del visor de Claude.
+  function fetchQuote(ticker, clave){
+    var url = "https://finnhub.io/api/v1/quote?symbol=" +
+      encodeURIComponent(String(ticker).toUpperCase()) +
+      "&token=" + encodeURIComponent(clave);
     var ctrl = new AbortController();
-    var corte = setTimeout(function(){ ctrl.abort(); }, ms || 12000);
-    return fetch(url, { signal: ctrl.signal, cache: "no-store" })
+    var corte = setTimeout(function(){ ctrl.abort(); }, 12000);
+    return fetch(url, { signal: ctrl.signal })
       .then(function(r){
-        if(!r.ok) throw new Error("respuesta " + r.status);
-        return r.text();
-      })
-      .then(function(t){
-        try{ return JSON.parse(t); }
-        catch(e){ throw new Error("respuesta ilegible"); }
-      })
-      .finally(function(){ clearTimeout(corte); });
-  }
-
-  // Recorre los puentes hasta que uno entregue algo que sirva. "leer" saca el
-  // dato del JSON y revienta si no viene, así un puente que responde basura no
-  // cuenta como éxito y se pasa al siguiente.
-  function fetchPorPuentes(url, leer){
-    var i = 0, motivos = [];
-    function intentar(){
-      if(i >= PUENTES.length){
-        ultimoFalloRed = motivos.join(" · ");
-        throw new Error(ultimoFalloRed || "sin conexión");
-      }
-      var arma = PUENTES[i++];
-      return fetchJson(arma(url), 12000)
-        .then(leer)
-        .catch(function(e){
-          motivos.push("intento " + i + ": " + (e && e.message ? e.message : "falló"));
-          return intentar();
-        });
-    }
-    return Promise.resolve().then(intentar);
-  }
-
-  function fetchQuote(ticker){
-    var destino = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-      encodeURIComponent(ticker) + "?interval=1d&range=1d";
-    return fetchPorPuentes(destino, function(j){
-      var res = j && j.chart && j.chart.result && j.chart.result[0];
-      var meta = res && res.meta;
-      var precio = meta && meta.regularMarketPrice;
-      if(typeof precio !== "number" || !isFinite(precio)){
-        var err = j && j.chart && j.chart.error;
-        throw new Error(err && err.description ? err.description : "sin precio");
-      }
-      return { price: precio, currency: (meta.currency || "").toUpperCase() };
-    });
-  }
-
-  // Cuánto vale una moneda en otra. Se pregunta primero a un servicio de
-  // divisas que sí deja consultarlo derecho desde el navegador; si no responde,
-  // se cae a la cotización del par en Yahoo, que sí necesita puente.
-  function fetchRate(desde, hasta){
-    var a = String(desde).toUpperCase(), b = String(hasta).toUpperCase();
-    return fetchJson("https://open.er-api.com/v6/latest/" + encodeURIComponent(a), 12000)
-      .then(function(j){
-        var r = j && j.rates && Number(j.rates[b]);
-        if(!(r > 0)) throw new Error("sin tasa");
-        return r;
-      })
-      .catch(function(){
-        return fetchQuote(a + b + "=X").then(function(q){
-          if(!(q.price > 0)) throw new Error("sin tasa");
-          return q.price;
+        clearTimeout(corte);
+        return r.text().then(function(txt){
+          if(r.status === 401 || r.status === 403){
+            var err = new Error("clave");
+            err.tipo = "clave";
+            throw err;
+          }
+          if(r.status === 429){
+            var e2 = new Error("limite");
+            e2.tipo = "limite";
+            throw e2;
+          }
+          if(!r.ok) throw new Error("HTTP " + r.status);
+          var j;
+          try{ j = JSON.parse(txt); }
+          catch(e){ throw new Error("respuesta rara: " + txt.slice(0, 60)); }
+          // Finnhub devuelve el precio actual en "c"; con símbolo inválido manda 0
+          var precio = Number(j && j.c);
+          if(!(precio > 0)){
+            var e3 = new Error("simbolo");
+            e3.tipo = "simbolo";
+            throw e3;
+          }
+          return { price: precio };
         });
       });
+  }
+
+  // La tasa de cambio no necesita clave
+  function fetchRate(desde, hacia){
+    var url = "https://open.er-api.com/v6/latest/" + encodeURIComponent(String(desde).toUpperCase());
+    var ctrl = new AbortController();
+    var corte = setTimeout(function(){ ctrl.abort(); }, 12000);
+    return fetch(url, { signal: ctrl.signal })
+      .then(function(r){
+        clearTimeout(corte);
+        if(!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function(j){
+        var tasa = j && j.rates && Number(j.rates[String(hacia).toUpperCase()]);
+        if(!(tasa > 0)) throw new Error("sin tasa");
+        return tasa;
+      });
+  }
+
+  function openApiKeySheet(){
+    var p = activeProfile();
+    openSheet(
+      '<div class="sheet-head"><h3>Clave para precios de bolsa</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">Cuadre usa <b>Finnhub</b> para traer los precios. Necesitas una clave gratuita y propia.</p>' +
+      '<ol class="pasos">' +
+        '<li>Entra a <b>finnhub.io/register</b> y crea la cuenta (es gratis).</li>' +
+        '<li>Copia el <i>API key</i> que te muestran al entrar.</li>' +
+        '<li>Pégalo aquí abajo.</li>' +
+      '</ol>' +
+      '<form id="keyForm" class="stack">' +
+        '<label class="field">Tu clave<input type="text" id="fhKey" value="' + esc(finnhubKey(p)) + '" placeholder="Pega aquí tu API key" autocomplete="off" spellcheck="false"></label>' +
+        '<button class="btn block" type="submit">Guardar clave</button>' +
+        (finnhubKey(p) ? '<button class="btn secondary block" type="button" id="fhBorrar">Borrar clave</button>' : '') +
+      '</form>' +
+      '<p class="note-line">La clave se guarda solo en este navegador, junto a tus datos. No viaja a ningún lado más que a Finnhub, y no queda en el código de la app — por eso cada persona pone la suya.</p>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    document.getElementById("keyForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      p.finnhubKey = document.getElementById("fhKey").value.trim();
+      saveDB();
+      closeSheet();
+      renderView();
+      showToast(p.finnhubKey ? "Clave guardada. Ya puedes actualizar precios." : "Clave vacía.");
+    });
+    var borrar = document.getElementById("fhBorrar");
+    if(borrar) borrar.addEventListener("click", function(){
+      p.finnhubKey = "";
+      saveDB();
+      closeSheet();
+      renderView();
+      showToast("Clave borrada.");
+    });
   }
 
   function refreshPrices(){
@@ -2988,36 +3019,61 @@
       showMessageSheet("Sin acciones", "Agrega una acción con su símbolo (por ejemplo AAPL) para poder actualizar precios.");
       return;
     }
+    var clave = finnhubKey(p);
+    if(!clave){ openApiKeySheet(); return; }
+
     showToast("Consultando precios…");
-    var listos = 0, fallidos = [];
+    var listos = 0;
+    var malSimbolo = [], otros = [];
+    var problemaClave = false, problemaLimite = false;
     var hoy = new Intl.DateTimeFormat("es", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}).format(new Date());
 
     Promise.all(acciones.map(function(h){
-      return fetchQuote(h.ticker)
-        .then(function(q){ h.price = q.price; h.quoteCurrency = q.currency; h.updatedAt = hoy; listos++; })
-        .catch(function(){ fallidos.push(h.ticker); });
+      return fetchQuote(h.ticker, clave)
+        .then(function(q){ h.price = q.price; h.updatedAt = hoy; listos++; })
+        .catch(function(err){
+          if(err && err.tipo === "clave") problemaClave = true;
+          else if(err && err.tipo === "limite") problemaLimite = true;
+          else if(err && err.tipo === "simbolo") malSimbolo.push(h.ticker);
+          else otros.push(h.ticker);
+        });
     })).then(function(){
-      // Con los precios ya puestos sabemos en qué monedas están; ahora las tasas.
       return refreshRates(p, hoy);
     }).then(function(tasasOk){
       saveDB();
       renderView();
-      if(listos && !fallidos.length){
-        showToast((listos === 1 ? "Precio actualizado" : listos + " precios actualizados") +
-                  (tasasOk === false ? ", pero no se pudo traer la tasa de cambio." : "."));
-      } else if(listos){
-        showToast(listos + " actualizados. Sin datos para: " + fallidos.join(", ") + ".");
-      } else {
-        showMessageSheet("No se pudieron traer los precios",
-          "Revisa tu conexión y que los símbolos sean correctos (por ejemplo AAPL). " +
-          "Dentro del visor de Claude esta consulta está bloqueada: funciona al abrir la app desde tu archivo o desde tu sitio publicado. " +
-          "Mientras tanto puedes escribir el precio a mano editando la acción." +
-          (ultimoFalloRed ? "\n\nDetalle técnico: " + ultimoFalloRed : ""));
+
+      if(problemaClave){
+        showMessageSheet("La clave no sirve",
+          "Finnhub rechazó la clave. Revísala o pega una nueva: toca “Clave de precios” debajo de los botones.");
+        return;
       }
+      if(problemaLimite){
+        showMessageSheet("Llegaste al límite por ahora",
+          "Finnhub limita cuántas consultas puedes hacer por minuto en el plan gratis. Espera un momento y vuelve a intentar.");
+        return;
+      }
+      if(listos){
+        var msg = (listos === 1 ? "Precio actualizado" : listos + " precios actualizados");
+        if(malSimbolo.length) msg += ". Sin datos para: " + malSimbolo.join(", ");
+        if(tasasOk === false) msg += ". No se pudo traer la tasa de cambio";
+        showToast(msg + ".");
+        return;
+      }
+      if(malSimbolo.length){
+        showMessageSheet("No encontró esos símbolos",
+          "Finnhub no reconoce: " + malSimbolo.join(", ") + ". Usa el símbolo de la bolsa de EE. UU. (por ejemplo AAPL, MSFT, TSLA). " +
+          "Las acciones de otros países suelen necesitar plan de pago.");
+        return;
+      }
+      showMessageSheet("No se pudo conectar",
+        "Revisa tu conexión a internet. Ten en cuenta que dentro del visor de Claude estas consultas están bloqueadas: " +
+        "funcionan al abrir la app desde tu archivo o desde tu sitio publicado. " +
+        "Mientras tanto puedes escribir el precio a mano editando la acción.");
     });
   }
 
-  // Trae cuántos pesos vale cada moneda extranjera que estés usando
+  // Trae cuántos pesos vale cada moneda extranjera que estés usando (sin clave)
   function refreshRates(p, sello){
     var monedas = usedForeignCurrencies(p);
     if(!monedas.length) return Promise.resolve(true);
@@ -3025,7 +3081,7 @@
     var ok = true;
     return Promise.all(monedas.map(function(c){
       return fetchRate(c, base)
-        .then(function(r){ p.fxRates[c] = r; })
+        .then(function(tasa){ p.fxRates[c] = tasa; })
         .catch(function(){ ok = false; });
     })).then(function(){
       if(ok) p.fxUpdatedAt = sello || "";
@@ -3118,6 +3174,7 @@
         else if(a === "add-holding") openHoldingSheet(null);
         else if(a === "refresh-prices") refreshPrices();
         else if(a === "edit-fx") openFxSheet();
+        else if(a === "api-key") openApiKeySheet();
         else if(a === "add-debt-debo") openAddDebt("debo");
         else if(a === "add-debt-prestado") openAddDebt("prestado");
         else if(a === "add-income") openAddIncome();
