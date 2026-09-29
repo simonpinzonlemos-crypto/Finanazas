@@ -309,6 +309,38 @@
   .cat-pie{margin-top:6px; font-size:.75rem; color:var(--ink-soft); font-family:var(--font-mono);}
   .cat-guardado{color:var(--good); font-weight:700;}
   .sav-dest{font-size:.72rem; color:var(--ink-soft); margin-top:1px;}
+
+  /* Reparto del ahorro entre categorías */
+  .reparto{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:10px 12px; margin-top:-4px;
+  }
+  .reparto-k{font-size:.78rem; color:var(--ink-soft); font-weight:600; margin-bottom:6px;}
+  .reparto-fila{
+    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px;
+    align-items:center; padding:5px 0; border-bottom:1px solid var(--line);
+  }
+  .reparto-fila:last-of-type{border-bottom:none;}
+  .reparto-nom{font-size:.85rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .reparto-val{font-family:var(--font-mono); font-weight:700; font-size:.9rem; text-align:right;}
+  .reparto-resto{
+    grid-column:1 / -1; font-family:var(--font-mono);
+    font-size:.7rem; color:var(--ink-soft);
+  }
+  .reparto-inp{
+    width:110px; text-align:right; font-family:var(--font-mono); font-weight:700;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
+    padding:7px 8px; color:var(--ink); font-size:.9rem;
+  }
+  .reparto-total{
+    display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+    margin-top:8px; padding-top:8px; border-top:1px solid var(--line);
+    font-size:.78rem; color:var(--ink-soft); font-weight:600;
+  }
+  .reparto-total .cuadra{color:var(--good);}
+  .reparto-total .descuadra{color:var(--warn);}
+  .reparto-resto .descuadra{color:var(--danger);}
+  .reparto .btn.ghost{margin-top:8px; min-height:38px; font-size:.8rem;}
   .exprow.devuelto .amt, .exprow.devuelto .cname{text-decoration:line-through; color:var(--ink-faint);}
   .exprow.devuelto .pill{background:var(--surface-2); color:var(--ink-soft);}
   .exprow .meta .linkbtn{margin-top:4px;}
@@ -1700,11 +1732,70 @@
   function savedByCategoryInRange(p, desde, hasta){
     var map = {};
     activeSavings(p).forEach(function(x){
-      if(!x.fromBudget || !x.categoryId) return;
+      if(!x.fromBudget) return;
       var d = String(x.date);
-      if(d >= desde && d <= hasta) map[x.categoryId] = (map[x.categoryId] || 0) + (Number(x.amount)||0);
+      if(d < desde || d > hasta) return;
+      // Un aporte puede salir de una sola categoría o venir repartido entre varias
+      if(Array.isArray(x.split) && x.split.length){
+        x.split.forEach(function(s){
+          if(s.categoryId) map[s.categoryId] = (map[s.categoryId] || 0) + (Number(s.amount)||0);
+        });
+        return;
+      }
+      if(x.categoryId) map[x.categoryId] = (map[x.categoryId] || 0) + (Number(x.amount)||0);
     });
     return map;
+  }
+
+  // Reparte un monto entre las categorías sin pasarse de lo que le queda a cada
+  // una: se va llenando por partes iguales y lo que no cabe vuelve a repartirse
+  // entre las que todavía tienen cupo.
+  function splitEquitably(p, monto){
+    var ciclo = currentCycle(p);
+    var gastos = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta);
+    var guardado = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta);
+    var cats = p.categories.filter(function(c){ return Number(c.amount) > 0; });
+    if(!cats.length || !(monto > 0)) return [];
+    var libre = {}, dado = {};
+    cats.forEach(function(c){
+      libre[c.id] = Math.max(0, (Number(c.amount)||0) - (gastos[c.id]||0) - (guardado[c.id]||0));
+      dado[c.id] = 0;
+    });
+    var pendiente = monto;
+    for(var vuelta = 0; vuelta < 40 && pendiente > 0.01; vuelta++){
+      var conCupo = cats.filter(function(c){ return libre[c.id] - dado[c.id] > 0.01; });
+      if(!conCupo.length) break;
+      var porCabeza = pendiente / conCupo.length;
+      conCupo.forEach(function(c){
+        var toma = Math.min(porCabeza, libre[c.id] - dado[c.id]);
+        dado[c.id] += toma;
+        pendiente -= toma;
+      });
+    }
+    // Si ya no queda cupo en ninguna, el resto se reparte igual entre todas
+    if(pendiente > 0.01){
+      var extra = pendiente / cats.length;
+      cats.forEach(function(c){ dado[c.id] += extra; });
+    }
+    return roundSplit(cats.map(function(c){
+      return { categoryId: c.id, amount: dado[c.id] };
+    }), monto);
+  }
+
+  // Redondea al peso y le pasa el sobrante al mayor, para que la suma cuadre
+  function roundSplit(partes, total){
+    var out = partes.map(function(x){
+      return { categoryId: x.categoryId, amount: Math.round(x.amount) };
+    }).filter(function(x){ return x.amount > 0; });
+    if(!out.length) return out;
+    var suma = out.reduce(function(s,x){ return s + x.amount; }, 0);
+    var dif = Math.round(total) - suma;
+    if(dif !== 0){
+      var mayor = out[0];
+      out.forEach(function(x){ if(x.amount > mayor.amount) mayor = x; });
+      mayor.amount += dif;
+    }
+    return out.filter(function(x){ return x.amount > 0; });
   }
   function netOutflowInRange(p, desde, hasta){
     return spentInRange(p, desde, hasta)
@@ -2084,9 +2175,13 @@
       '<form id="saveToForm" class="stack" style="margin-top:12px;">' +
         '<label class="field">¿Cuánto vas a guardar?<input type="text" id="stAmount" inputmode="decimal" value="' + (monto0 > 0 ? monto0 : "") + '" placeholder="Ej. 400.000" required></label>' +
         '<label class="field">¿De qué categoría sale?<select id="stCat">' +
-          '<option value="">De lo que sobró en general</option>' + categoryOptions(p) +
+          (p.categories.length
+            ? '<option value="__auto">De lo que sobró en general — repartido entre todas</option>' +
+              '<option value="__manual">Lo reparto yo mismo</option>' +
+              categoryOptions(p)
+            : '<option value="">Todavía no tienes categorías</option>') +
         '</select></label>' +
-        '<div class="queda-hint" id="stCatHint"></div>' +
+        '<div id="stCatBox"></div>' +
         '<label class="field">¿Dónde va a quedar?<select id="stDest">' + holdingOptions(p) + '</select></label>' +
         '<div id="stExtra" class="stack"></div>' +
         '<div class="queda-hint" id="stPreview"></div>' +
@@ -2100,20 +2195,109 @@
     var elDest = document.getElementById("stDest");
     var elExtra = document.getElementById("stExtra");
 
+    // Lo que se escribió a mano en cada categoría
+    function leerManual(){
+      var out = [];
+      [].slice.call(document.querySelectorAll("#stCatBox [data-split]")).forEach(function(i){
+        var v = Math.round(parseNum(i.value));
+        if(v > 0) out.push({ categoryId: i.dataset.split, amount: v });
+      });
+      return out;
+    }
+    function sumaManual(){
+      return leerManual().reduce(function(s,x){ return s + x.amount; }, 0);
+    }
+    function totalManual(){
+      var caja = document.getElementById("stSplitTotal");
+      if(!caja) return;
+      var monto = Math.round(parseNum(elAmount.value));
+      var suma = sumaManual();
+      var falta = monto - suma;
+      caja.innerHTML =
+        '<span>Repartido ' + fmt(p, suma) + ' de ' + fmt(p, monto) + '</span>' +
+        '<span class="' + (falta === 0 ? "cuadra" : "descuadra") + '">' +
+          (falta === 0 ? "cuadra" : falta > 0 ? "faltan " + fmt(p, falta) : "sobran " + fmt(p, -falta)) +
+        '</span>';
+    }
+    function repartirParejo(){
+      var partes = splitEquitably(p, Math.round(parseNum(elAmount.value)));
+      var mapa = {};
+      partes.forEach(function(x){ mapa[x.categoryId] = x.amount; });
+      [].slice.call(document.querySelectorAll("#stCatBox [data-split]")).forEach(function(i){
+        i.value = mapa[i.dataset.split] ? mapa[i.dataset.split] : "";
+      });
+      totalManual();
+    }
+
+    function filaReparto(nombre, valorHtml, restoTxt){
+      return '<div class="reparto-fila">' +
+        '<span class="reparto-nom">' + nombre + '</span>' + valorHtml +
+        '<span class="reparto-resto tnum">' + restoTxt + '</span>' +
+      '</div>';
+    }
+
     function pintarCat(){
-      var caja = document.getElementById("stCatHint");
-      var r = catRemaining(p, elCat.value);
-      if(!r){
-        caja.innerHTML = elCat.value
+      var caja = document.getElementById("stCatBox");
+      var modo = elCat.value;
+      var monto = Math.round(parseNum(elAmount.value));
+
+      if(modo === "__manual"){
+        // Se dibuja una sola vez para no borrar lo que vas escribiendo
+        if(!caja.querySelector(".reparto-manual")){
+          caja.innerHTML = '<div class="reparto reparto-manual">' +
+            '<div class="reparto-k">¿Cuánto sale de cada una?</div>' +
+            p.categories.map(function(c){
+              var r = catRemaining(p, c.id);
+              return filaReparto(
+                esc(c.name),
+                '<input class="reparto-inp tnum" type="text" inputmode="decimal" data-split="' + c.id + '" placeholder="0">',
+                r ? "de " + fmt(p, r.queda) : "sin monto"
+              );
+            }).join("") +
+            '<div class="reparto-total" id="stSplitTotal"></div>' +
+            '<button class="btn ghost block" type="button" id="stSplitEven">Repartir parejo</button>' +
+          '</div>';
+        }
+        totalManual();
+        return;
+      }
+
+      if(modo === "__auto"){
+        if(!(monto > 0)){ caja.innerHTML = ""; return; }
+        var partes = splitEquitably(p, monto);
+        if(!partes.length){
+          caja.innerHTML = '<div class="queda-hint"><span class="qh-k">Ponles monto a tus categorías en la pestaña Plan para poder repartir.</span></div>';
+          return;
+        }
+        caja.innerHTML = '<div class="reparto">' +
+          '<div class="reparto-k">Se descuenta así:</div>' +
+          partes.map(function(x){
+            var c = getCategory(p, x.categoryId);
+            var r = catRemaining(p, x.categoryId);
+            var resto = (r ? r.queda : 0) - x.amount;
+            return filaReparto(
+              esc(c ? c.name : "—"),
+              '<span class="reparto-val tnum">' + fmt(p, x.amount) + '</span>',
+              '<span class="' + (resto < 0 ? "descuadra" : "") + '">quedan ' + fmt(p, resto) + '</span>'
+            );
+          }).join("") +
+        '</div>';
+        return;
+      }
+
+      caja.innerHTML = '<div class="queda-hint" id="stCatHint"></div>';
+      var hint = document.getElementById("stCatHint");
+      var r2 = catRemaining(p, modo);
+      if(!r2){
+        hint.innerHTML = modo
           ? '<span class="qh-k">Esa categoría no tiene monto asignado.</span>'
           : '<span class="qh-k">No se descuenta de ninguna categoría, solo del total del periodo.</span>';
         return;
       }
-      var monto = parseNum(elAmount.value);
-      var despues = r.queda - monto;
-      caja.innerHTML =
-        '<span class="qh-k">Te quedan en ' + esc(r.cat.name) + '</span>' +
-        '<span class="qh-v tnum">' + fmt(p, r.queda) + '</span>' +
+      var despues = r2.queda - monto;
+      hint.innerHTML =
+        '<span class="qh-k">Te quedan en ' + esc(r2.cat.name) + '</span>' +
+        '<span class="qh-v tnum">' + fmt(p, r2.queda) + '</span>' +
         (monto > 0
           ? '<span class="qh-after' + (despues < 0 ? " danger" : "") + '">' +
               (despues >= 0 ? 'Si guardas esto, quedarían ' + fmt(p, despues) : 'Te pasarías por ' + fmt(p, -despues)) +
@@ -2188,7 +2372,18 @@
       pintarPreview();
     }
 
-    elCat.addEventListener("change", pintarCat);
+    var elCatBox = document.getElementById("stCatBox");
+    // Delegado: las filas del reparto manual se repintan y no conviene
+    // volver a enganchar un listener por cada una
+    elCatBox.addEventListener("input", function(ev){
+      if(ev.target && ev.target.dataset && ev.target.dataset.split) totalManual();
+    });
+    elCatBox.addEventListener("click", function(ev){
+      var b = ev.target.closest ? ev.target.closest("#stSplitEven") : null;
+      if(b){ ev.preventDefault(); repartirParejo(); }
+    });
+
+    elCat.addEventListener("change", function(){ elCatBox.innerHTML = ""; pintarCat(); });
     elAmount.addEventListener("input", function(){ pintarCat(); pintarPreview(); });
     elDest.addEventListener("change", pintarExtra);
     pintarCat();
@@ -2201,6 +2396,30 @@
         showMessageSheet("Falta el monto", "Escribe cuánto quieres guardar.");
         return;
       }
+      // De dónde sale: una categoría, repartido parejo, o repartido a mano
+      var modo = elCat.value;
+      var catId = "", split = [];
+      if(modo === "__auto"){
+        split = splitEquitably(p, monto);
+        if(!split.length){
+          showMessageSheet("No hay de dónde repartir",
+            "Ninguna de tus categorías tiene monto asignado. Ponles uno en la pestaña Plan, o elige una categoría concreta.");
+          return;
+        }
+      } else if(modo === "__manual"){
+        split = leerManual();
+        var suma = sumaManual();
+        if(suma !== monto){
+          showMessageSheet("El reparto no cuadra",
+            "Repartiste " + fmt(p, suma) + " de " + fmt(p, monto) + ". " +
+            (suma < monto ? "Faltan " + fmt(p, monto - suma) : "Sobran " + fmt(p, suma - monto)) +
+            ". Ajusta los montos o usa “Repartir parejo”.");
+          return;
+        }
+      } else {
+        catId = modo === "__auto" || modo === "__manual" ? "" : modo;
+      }
+
       var res = resolveDestino(p, elDest.value);
       if(res.error){ showMessageSheet("Falta un dato", res.error); return; }
       var fecha = cfg.fecha || todayStr();
@@ -2214,7 +2433,8 @@
         id: sid, date: fecha, amount: monto,
         note: cfg.nota || "",
         fromBudget: cfg.fromBudget !== false,
-        categoryId: elCat.value || "",
+        categoryId: catId,
+        split: split,
         holdingId: res.h.id,
         movementId: efecto.movementId || "",
         shares: efecto.shares || 0,
@@ -2253,10 +2473,20 @@
     if(!entry || entry.returned) return;
     var h = findHolding(p, entry.holdingId);
     var cat = entry.categoryId ? getCategory(p, entry.categoryId) : null;
+    var vuelveA = "";
+    if(cat){
+      vuelveA = " en " + cat.name;
+    } else if(Array.isArray(entry.split) && entry.split.length){
+      var trozos = entry.split.map(function(s){
+        var cc = getCategory(p, s.categoryId);
+        return cc ? cc.name + " (" + fmt(p, s.amount) + ")" : null;
+      }).filter(Boolean);
+      if(trozos.length) vuelveA = ", repartido de vuelta en " + trozos.join(", ");
+    }
     askConfirm({
       title: "Devolver al presupuesto",
       body: "Sacas " + fmt(p, entry.amount) + (h ? " de " + h.name : "") +
-            " y vuelve a contar como plata disponible para gastar" + (cat ? " en " + cat.name : "") + ".",
+            " y vuelve a contar como plata disponible para gastar" + vuelveA + ".",
       confirmLabel: "Devolver " + fmt(p, entry.amount),
       onConfirm: function(){
         undoDeposit(p, h, entry);
@@ -3116,7 +3346,7 @@
 
     var combined = p.savings.map(function(x){
         return {date:x.date, amount:Number(x.amount), type:"ahorro", note:x.note, id:x.id,
-                holdingId:x.holdingId, categoryId:x.categoryId, fromBudget:!!x.fromBudget,
+                holdingId:x.holdingId, categoryId:x.categoryId, split:x.split, fromBudget:!!x.fromBudget,
                 returned:!!x.returned, returnedDate:x.returnedDate, shares:x.shares};
       })
       .concat(p.interest.map(function(x){ return {date:x.date, amount:Number(x.amount), type:"interes", note:x.note, id:x.id}; }));
@@ -3132,7 +3362,17 @@
       var cat = e.categoryId ? getCategory(p, e.categoryId) : null;
       var pista = [];
       if(destino) pista.push("→ " + esc(destino.name) + (e.shares > 0 ? " · " + Number(e.shares).toLocaleString("es-CO", {maximumFractionDigits:4}) + " acc." : ""));
-      if(cat) pista.push("de " + esc(cat.name));
+      if(cat){
+        pista.push("de " + esc(cat.name));
+      } else if(Array.isArray(e.split) && e.split.length){
+        var nombres = e.split.map(function(s){
+          var cc = getCategory(p, s.categoryId);
+          return cc ? cc.name : null;
+        }).filter(Boolean);
+        if(nombres.length) pista.push(nombres.length <= 2
+          ? "de " + esc(nombres.join(" y "))
+          : "repartido entre " + nombres.length + " categorías");
+      }
       var puedeDevolver = e.type === "ahorro" && e.fromBudget && !e.returned;
       return '<div class="exprow' + (e.returned ? " devuelto" : "") + '">' +
         '<span class="pill ' + (e.returned ? "" : e.type==="ahorro"?"good":"warn") + '" style="min-width:56px; text-align:center;">' +
