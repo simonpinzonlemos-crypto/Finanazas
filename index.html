@@ -296,12 +296,38 @@
   .catcard{padding:12px 0; border-bottom:1px solid var(--line);}
   .catcard:last-child{border-bottom:none;}
   .catcard .row{margin-bottom:6px;}
-  .catcard .amounts{font-family:var(--font-mono); font-size:.78rem; color:var(--ink-soft); gap:10px;}
-  .catcard .amounts span{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  /* La pastilla ahora lleva plata, no un porcentaje: que no se parta */
-  .catcard .pill{font-family:var(--font-mono); white-space:nowrap; flex:0 0 auto;}
-  .catcard > .row > .row{min-width:0;}
-  .catcard > .row > .row span:last-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .cat-nombre{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .cat-llevas{font-size:.75rem; color:var(--ink-soft); white-space:nowrap; flex:0 0 auto;}
+  /* Lo que queda es el dato principal de la tarjeta: se lee de un vistazo */
+  .cat-queda{display:flex; align-items:baseline; gap:7px; margin:2px 0 8px; flex-wrap:wrap;}
+  .cat-queda-k{font-size:.78rem; color:var(--ink-soft); font-weight:600;}
+  .cat-queda-v{font-family:var(--font-mono); font-size:1.25rem; font-weight:700; line-height:1.1;}
+  .cat-queda-v.good{color:var(--ink);}
+  .cat-queda-v.warn{color:var(--warn);}
+  .cat-queda-v.danger{color:var(--danger);}
+  .cat-queda.sinmonto{font-size:.85rem; color:var(--ink-faint); font-weight:600;}
+  .cat-pie{margin-top:6px; font-size:.75rem; color:var(--ink-soft); font-family:var(--font-mono);}
+  .cat-guardado{color:var(--good); font-weight:700;}
+  .sav-dest{font-size:.72rem; color:var(--ink-soft); margin-top:1px;}
+  .exprow.devuelto .amt, .exprow.devuelto .cname{text-decoration:line-through; color:var(--ink-faint);}
+  .exprow.devuelto .pill{background:var(--surface-2); color:var(--ink-soft);}
+  .exprow .meta .linkbtn{margin-top:4px;}
+
+  /* Aviso dentro del formulario de gasto: cuánto queda en esa categoría */
+  .queda-hint:empty{display:none;}
+  .queda-hint{
+    display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:9px 12px; margin-top:-4px;
+  }
+  .qh-k{font-size:.78rem; color:var(--ink-soft); font-weight:600;}
+  .qh-v{font-family:var(--font-mono); font-weight:700; font-size:1rem; color:var(--ink);}
+  .qh-v.danger{color:var(--danger);}
+  .qh-after{
+    font-size:.74rem; color:var(--ink-faint); font-weight:600;
+    flex-basis:100%;
+  }
+  .qh-after.danger{color:var(--danger);}
 
   .expday{margin-bottom:18px;}
   .expday-label{font-size:.75rem; font-weight:700; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;}
@@ -966,10 +992,19 @@
     return v;
   }
 
+  // Un aporte devuelto al presupuesto deja de contar como ahorro
+  function activeSavings(p){
+    return (p.savings || []).filter(function(s){ return !s.returned; });
+  }
+  function findHolding(p, id){
+    for(var i=0;i<p.holdings.length;i++){ if(p.holdings[i].id === id) return p.holdings[i]; }
+    return null;
+  }
+
   // Valor en la moneda propia del papel (sin convertir)
   function holdingNativeValue(h){
     if(!h) return 0;
-    if(h.kind === "cuenta") return Number(h.amount) || 0;
+    if(h.kind === "cuenta") return (Number(h.amount) || 0) + movesSum(h);
     if(h.kind === "cdt"){
       // Si escribiste un valor a mano, ese número manda tal cual; solo se le
       // suman los abonos y retiros que hiciste después de escribirlo.
@@ -981,7 +1016,7 @@
   }
   function holdingNativeCost(h){
     if(!h) return 0;
-    if(h.kind === "cuenta") return Number(h.amount) || 0;
+    if(h.kind === "cuenta") return (Number(h.amount) || 0) + movesSum(h);
     if(h.kind === "cdt") return (Number(h.principal) || 0) + movesSum(h);
     if(h.kind === "accion") return (Number(h.shares) || 0) * (Number(h.buyPrice) || Number(h.price) || 0);
     return 0;
@@ -1656,10 +1691,20 @@
   // Plata que apartaste del presupuesto y mandaste al ahorro. Sale del bolsillo
   // igual que un gasto: deja de estar disponible para gastar.
   function budgetSavingsInRange(p, desde, hasta){
-    return (p.savings || []).reduce(function(s, x){
+    return activeSavings(p).reduce(function(s, x){
       var d = String(x.date);
       return s + ((x.fromBudget && d >= desde && d <= hasta) ? (Number(x.amount)||0) : 0);
     }, 0);
+  }
+  // Lo guardado, repartido por la categoría de la que lo sacaste
+  function savedByCategoryInRange(p, desde, hasta){
+    var map = {};
+    activeSavings(p).forEach(function(x){
+      if(!x.fromBudget || !x.categoryId) return;
+      var d = String(x.date);
+      if(d >= desde && d <= hasta) map[x.categoryId] = (map[x.categoryId] || 0) + (Number(x.amount)||0);
+    });
+    return map;
   }
   function netOutflowInRange(p, desde, hasta){
     return spentInRange(p, desde, hasta)
@@ -1849,65 +1894,380 @@
       '<div class="cierre-monto tnum">' + fmt(p, w.sobra) + '</div>' +
       '<div class="sub">te sobraron del ' + cycleLabel(w.semana) + '</div>' +
       '<p class="note-line" style="margin-top:8px;">Tenías ' + fmt(p, w.plan) + ' para esa semana y gastaste ' + fmt(p, w.gastado) + '. ¿Mandas la diferencia al ahorro? Si la guardas, deja de contar como plata disponible.</p>' +
-      '<button class="btn block" style="margin-top:12px;" data-weeksave="' + w.semana.desde + '">Sí, guardar ' + fmt(p, w.sobra) + '</button>' +
-      '<div class="fab-row" style="margin-top:8px;">' +
-        '<button class="btn ghost block" data-weekother="' + w.semana.desde + '">Otra cantidad</button>' +
-        '<button class="btn ghost block" data-weekskip="' + w.semana.desde + '">Déjalos ahí</button>' +
-      '</div>' +
+      '<button class="btn block" style="margin-top:12px;" data-weeksave="' + w.semana.desde + '">Sí, mandarlo al ahorro</button>' +
+      '<button class="btn ghost block" style="margin-top:8px;" data-weekskip="' + w.semana.desde + '">Déjalos ahí</button>' +
     '</div>';
   }
 
-  // Manda al ahorro lo que sobró de una semana ya cerrada
-  function saveWeekLeftover(clave, monto){
-    var p = activeProfile();
-    var w = pendingWeekClose(p);
-    if(!w || w.semana.desde !== clave){   // la pantalla quedó vieja
-      renderApp();
-      return;
-    }
-    // Al peso: así lo que queda guardado es exactamente lo que decía el botón
-    var valor = Math.round((monto == null) ? w.sobra : monto);
-    if(!(valor > 0)) return;
-    var sid = uid();
-    p.savings.push({
-      id: sid,
-      date: w.semana.hasta,
-      amount: valor,
-      note: "Sobrante semana " + cycleLabel(w.semana),
-      fromBudget: true
+  // ---------- mandar plata al ahorro ----------
+  // Guardar no es solo anotar un número: la plata queda en un lugar concreto
+  // (una cuenta, un CDT, unas acciones) y sale de una categoría del presupuesto.
+  var KIND_NEW = { "new:cuenta":"cuenta", "new:cdt":"cdt", "new:accion":"accion" };
+
+  function holdingOptions(p){
+    var grupos = [["cuenta","Cuentas y efectivo"], ["cdt","CDTs y cajas"], ["accion","Acciones y ETFs"]];
+    var html = "";
+    grupos.forEach(function(g){
+      var lista = p.holdings.filter(function(h){ return h.kind === g[0]; });
+      if(!lista.length) return;
+      html += '<optgroup label="' + g[1] + '">' + lista.map(function(h){
+        return '<option value="' + h.id + '">' + esc(h.name) + '</option>';
+      }).join("") + '</optgroup>';
     });
-    p.weekClose[clave] = { r: "ahorro", amount: valor, savingId: sid, at: todayStr() };
-    saveDB();
-    renderApp();
-    showToast("Guardaste " + fmt(p, valor) + " en tus ahorros.");
+    return html +
+      '<optgroup label="Crear uno nuevo">' +
+        '<option value="new:cuenta">Nueva cuenta de ahorros</option>' +
+        '<option value="new:cdt">Abrir un CDT o caja nueva</option>' +
+        '<option value="new:accion">Comprar una acción o ETF</option>' +
+      '</optgroup>';
   }
 
+  // Si el papel cotiza en otra moneda y todavía no sabemos la tasa, se pregunta
+  function fxFieldHtml(p, code){
+    if(!code || !isForeign(p, code) || fxRate(p, code) != null) return "";
+    return '<label class="field">¿A cuánto está 1 ' + esc(String(code).toUpperCase()) + ' en ' + esc(p.currencyCode || "COP") + '?' +
+      '<input type="text" id="stFx" inputmode="decimal" placeholder="Ej. 3.950"></label>';
+  }
+
+  function destExtraHtml(p, dest){
+    var nuevo = KIND_NEW[dest];
+    if(nuevo === "cuenta"){
+      return '<label class="field">Nombre de la cuenta<input type="text" id="stName" maxlength="30" placeholder="Ej. Ahorros Bancolombia"></label>';
+    }
+    if(nuevo === "cdt"){
+      return '<label class="field">Nombre<input type="text" id="stName" maxlength="30" placeholder="Ej. Caja Nu, CDT 6 meses"></label>' +
+        '<label class="field">Tasa anual (E.A. %)<input type="text" id="stRate" inputmode="decimal" placeholder="Ej. 11,5"></label>' +
+        '<label class="field">¿Tiene fecha de vencimiento?<select id="stHasTerm">' +
+          '<option value="no">No, abierto — puedo sacar y meter (tipo caja de Nu)</option>' +
+          '<option value="si">Sí, a plazo fijo</option>' +
+        '</select></label>' +
+        '<label class="field" id="stTermWrap" style="display:none;">Plazo en meses<input type="number" id="stTerm" min="1" step="1" inputmode="numeric" placeholder="Ej. 12"></label>';
+    }
+    if(nuevo === "accion"){
+      // La moneda puede haber cambiado: la tasa que se pide es la de esa moneda
+      var campoCur = document.getElementById("stCur");
+      var cur = campoCur ? (String(campoCur.value).trim().toUpperCase() || "USD") : "USD";
+      return '<label class="field">Símbolo<input type="text" id="stTicker" maxlength="12" autocapitalize="characters" placeholder="Ej. VOO, SPY, AAPL"></label>' +
+        '<label class="field">Precio por acción<input type="text" id="stPrice" inputmode="decimal" placeholder="Ej. 261,74"></label>' +
+        '<label class="field">Moneda en que cotiza<input type="text" id="stCur" maxlength="3" autocapitalize="characters" value="' + esc(cur) + '"></label>' +
+        fxFieldHtml(p, cur);
+    }
+    var h = findHolding(p, dest);
+    if(h && h.kind === "accion"){
+      return '<label class="field">Precio por acción hoy<input type="text" id="stPrice" inputmode="decimal" value="' + (h.price != null ? h.price : "") + '" placeholder="Ej. 261,74"></label>' +
+        fxFieldHtml(p, holdingCurrency(h));
+    }
+    return "";
+  }
+
+  // Deja guardada la tasa que escribiste; avisa si sigue faltando
+  function ensureRate(p, code){
+    if(!code || !isForeign(p, code)) return "";
+    var campo = document.getElementById("stFx");
+    var v = campo ? parseNum(campo.value) : 0;
+    if(v > 0){ p.fxRates[String(code).toUpperCase()] = v; return ""; }
+    if(fxRate(p, code) != null) return "";
+    return "Falta saber a cuánto está 1 " + String(code).toUpperCase() + " en " + (p.currencyCode || "COP") +
+           ". Escríbelo para poder convertir tu plata.";
+  }
+
+  // El tipo de ahorro donde va a caer la plata; lo crea si elegiste uno nuevo
+  function resolveDestino(p, dest){
+    function val(id){ var e = document.getElementById(id); return e ? String(e.value) : ""; }
+    var nuevo = KIND_NEW[dest];
+    if(!nuevo){
+      var h = findHolding(p, dest);
+      if(!h) return { error: "Ese tipo de ahorro ya no existe. Elige otro." };
+      if(h.kind === "accion"){
+        var pr = parseNum(val("stPrice"));
+        if(!(pr > 0)) return { error: "Escribe a cuánto está la acción para saber cuántas alcanzas a comprar." };
+        var e1 = ensureRate(p, holdingCurrency(h));
+        if(e1) return { error: e1 };
+        return { h: h, precio: pr };
+      }
+      return { h: h };
+    }
+    if(nuevo === "cuenta"){
+      var nom = val("stName").trim();
+      if(!nom) return { error: "Ponle un nombre a la cuenta." };
+      var hc = { id: uid(), kind: "cuenta", name: nom, amount: 0, movements: [], colorIdx: p.holdings.length };
+      p.holdings.push(hc);
+      return { h: hc };
+    }
+    if(nuevo === "cdt"){
+      var nom2 = val("stName").trim();
+      if(!nom2) return { error: "Ponle un nombre al CDT o a la caja." };
+      var abierto = val("stHasTerm") !== "si";
+      var plazo = abierto ? 0 : parseNum(val("stTerm"));
+      if(!abierto && !(plazo > 0)) return { error: "Escribe a cuántos meses es el CDT." };
+      var hd = {
+        id: uid(), kind: "cdt", name: nom2,
+        principal: 0, rate: parseNum(val("stRate")),
+        startDate: todayStr(), openEnded: abierto, termMonths: plazo,
+        currentValue: 0, movements: [], colorIdx: p.holdings.length
+      };
+      p.holdings.push(hd);
+      return { h: hd };
+    }
+    var tic = val("stTicker").trim().toUpperCase();
+    var pr2 = parseNum(val("stPrice"));
+    var cur = (val("stCur").trim() || "USD").toUpperCase();
+    if(!tic) return { error: "Escribe el símbolo de la acción o el ETF." };
+    if(!(pr2 > 0)) return { error: "Escribe el precio por acción." };
+    var e2 = ensureRate(p, cur);
+    if(e2) return { error: e2 };
+    var ha = {
+      id: uid(), kind: "accion", name: tic, ticker: tic,
+      shares: 0, buyPrice: 0, price: pr2, quoteCurrency: cur,
+      colorIdx: p.holdings.length
+    };
+    p.holdings.push(ha);
+    return { h: ha, precio: pr2 };
+  }
+
+  // Mete la plata en el tipo de ahorro y devuelve con qué deshacerlo después
+  function applyDeposit(p, h, monto, fecha, precio){
+    if(h.kind === "accion"){
+      var tasa = fxRate(p, holdingCurrency(h));
+      if(tasa == null) return null;
+      var pr = Number(precio) || Number(h.price) || 0;
+      if(!(pr > 0)) return null;
+      var nativo = monto / tasa;                    // de tu moneda a la de la acción
+      var acciones = nativo / pr;
+      // Precio de compra promedio: así la ganancia que ves sigue siendo real
+      var costo = (Number(h.shares)||0) * (Number(h.buyPrice)||0) + nativo;
+      h.shares = (Number(h.shares)||0) + acciones;
+      h.buyPrice = h.shares > 0 ? costo / h.shares : 0;
+      h.price = pr;
+      return { shares: acciones, nativo: nativo };
+    }
+    if(!Array.isArray(h.movements)) h.movements = [];
+    var mid = uid();
+    h.movements.push({ id: mid, date: fecha, at: Date.now(), amount: monto });
+    return { movementId: mid };
+  }
+
+  // Saca del tipo de ahorro lo que estás devolviendo al presupuesto
+  function undoDeposit(p, h, entry){
+    if(!h) return;
+    if(h.kind === "accion"){
+      var nativo = Number(entry.nativo) || 0;
+      var costo = (Number(h.shares)||0) * (Number(h.buyPrice)||0) - nativo;
+      h.shares = Math.max(0, (Number(h.shares)||0) - (Number(entry.shares) || 0));
+      h.buyPrice = h.shares > 0 ? Math.max(0, costo) / h.shares : 0;
+      return;
+    }
+    if(entry.movementId && Array.isArray(h.movements)){
+      h.movements = h.movements.filter(function(m){ return m.id !== entry.movementId; });
+    }
+  }
+
+  // Cuánto queda en una categoría dentro del periodo en curso
+  function catRemaining(p, catId){
+    var c = getCategory(p, catId);
+    if(!c) return null;
+    var ciclo = currentCycle(p);
+    var alloc = Number(c.amount) || 0;
+    if(alloc <= 0) return null;
+    var g = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta)[catId] || 0;
+    var a = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta)[catId] || 0;
+    return { cat: c, alloc: alloc, queda: alloc - g - a };
+  }
+
+  // La misma hoja sirve para el sobrante de la semana y para un aporte suelto
+  function openSaveToSheet(cfg){
+    var p = activeProfile();
+    var monto0 = Math.round(Number(cfg.monto) || 0);
+    openSheet(
+      '<div class="sheet-head"><h3>' + esc(cfg.titulo || "Mandar al ahorro") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      (cfg.sub ? '<p class="sub">' + cfg.sub + '</p>' : '') +
+      '<form id="saveToForm" class="stack" style="margin-top:12px;">' +
+        '<label class="field">¿Cuánto vas a guardar?<input type="text" id="stAmount" inputmode="decimal" value="' + (monto0 > 0 ? monto0 : "") + '" placeholder="Ej. 400.000" required></label>' +
+        '<label class="field">¿De qué categoría sale?<select id="stCat">' +
+          '<option value="">De lo que sobró en general</option>' + categoryOptions(p) +
+        '</select></label>' +
+        '<div class="queda-hint" id="stCatHint"></div>' +
+        '<label class="field">¿Dónde va a quedar?<select id="stDest">' + holdingOptions(p) + '</select></label>' +
+        '<div id="stExtra" class="stack"></div>' +
+        '<div class="queda-hint" id="stPreview"></div>' +
+        '<button class="btn block" type="submit">Guardar en ahorros</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+
+    var elAmount = document.getElementById("stAmount");
+    var elCat = document.getElementById("stCat");
+    var elDest = document.getElementById("stDest");
+    var elExtra = document.getElementById("stExtra");
+
+    function pintarCat(){
+      var caja = document.getElementById("stCatHint");
+      var r = catRemaining(p, elCat.value);
+      if(!r){
+        caja.innerHTML = elCat.value
+          ? '<span class="qh-k">Esa categoría no tiene monto asignado.</span>'
+          : '<span class="qh-k">No se descuenta de ninguna categoría, solo del total del periodo.</span>';
+        return;
+      }
+      var monto = parseNum(elAmount.value);
+      var despues = r.queda - monto;
+      caja.innerHTML =
+        '<span class="qh-k">Te quedan en ' + esc(r.cat.name) + '</span>' +
+        '<span class="qh-v tnum">' + fmt(p, r.queda) + '</span>' +
+        (monto > 0
+          ? '<span class="qh-after' + (despues < 0 ? " danger" : "") + '">' +
+              (despues >= 0 ? 'Si guardas esto, quedarían ' + fmt(p, despues) : 'Te pasarías por ' + fmt(p, -despues)) +
+            '</span>'
+          : '');
+    }
+
+    function pintarPreview(){
+      var caja = document.getElementById("stPreview");
+      var monto = parseNum(elAmount.value);
+      var dest = elDest.value;
+      var nuevo = KIND_NEW[dest];
+      if(!(monto > 0)){ caja.innerHTML = ""; return; }
+      var h = nuevo ? null : findHolding(p, dest);
+      var esAccion = nuevo === "accion" || (h && h.kind === "accion");
+      if(esAccion){
+        var campoP = document.getElementById("stPrice");
+        var precio = campoP ? parseNum(campoP.value) : 0;
+        var campoCur = document.getElementById("stCur");
+        var code = nuevo ? ((campoCur && campoCur.value.trim()) || "USD").toUpperCase() : holdingCurrency(h);
+        var campoFx = document.getElementById("stFx");
+        var tasa = (campoFx && parseNum(campoFx.value) > 0) ? parseNum(campoFx.value) : fxRate(p, code);
+        if(!(precio > 0) || tasa == null){ caja.innerHTML = ""; return; }
+        var nativo = monto / tasa;
+        var acciones = nativo / precio;
+        caja.innerHTML =
+          '<span class="qh-k">Comprarías</span>' +
+          '<span class="qh-v tnum">' + acciones.toLocaleString("es-CO", {maximumFractionDigits:4}) + '</span>' +
+          '<span class="qh-after">' + fmt(p, monto) +
+            (isForeign(p, code) ? ' = ' + fmtNative(code, nativo) : '') +
+            ' a ' + (isForeign(p, code) ? fmtNative(code, precio) : fmtDec(p, precio, 2)) + ' cada una</span>';
+        return;
+      }
+      if(h){
+        caja.innerHTML =
+          '<span class="qh-k">' + esc(h.name) + ' pasaría a</span>' +
+          '<span class="qh-v tnum">' + fmt(p, holdingNativeValue(h) + monto) + '</span>' +
+          '<span class="qh-after">hoy tiene ' + fmt(p, holdingNativeValue(h)) + '</span>';
+        return;
+      }
+      caja.innerHTML = '<span class="qh-k">Se crea con</span><span class="qh-v tnum">' + fmt(p, monto) + '</span>';
+    }
+
+    function wireExtra(){
+      var term = document.getElementById("stHasTerm");
+      if(term){
+        var wrap = document.getElementById("stTermWrap");
+        term.addEventListener("change", function(){ wrap.style.display = term.value === "si" ? "flex" : "none"; });
+      }
+      ["stPrice","stFx","stCur"].forEach(function(id){
+        var e = document.getElementById(id);
+        if(!e) return;
+        e.addEventListener("input", function(){
+          if(id === "stCur") pintarExtra();   // otra moneda puede pedir otra tasa
+          else pintarPreview();
+        });
+      });
+    }
+    function pintarExtra(){
+      var guardado = {};
+      ["stName","stRate","stTerm","stHasTerm","stTicker","stPrice","stCur"].forEach(function(id){
+        var e = document.getElementById(id);
+        if(e) guardado[id] = e.value;
+      });
+      elExtra.innerHTML = destExtraHtml(p, elDest.value);
+      // Al repintar por cambio de moneda se conserva lo que ya habías escrito
+      Object.keys(guardado).forEach(function(id){
+        var e = document.getElementById(id);
+        if(e && guardado[id] !== "") e.value = guardado[id];
+      });
+      wireExtra();
+      pintarPreview();
+    }
+
+    elCat.addEventListener("change", pintarCat);
+    elAmount.addEventListener("input", function(){ pintarCat(); pintarPreview(); });
+    elDest.addEventListener("change", pintarExtra);
+    pintarCat();
+    pintarExtra();
+
+    document.getElementById("saveToForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var monto = Math.round(parseNum(elAmount.value));
+      if(!(monto > 0)){
+        showMessageSheet("Falta el monto", "Escribe cuánto quieres guardar.");
+        return;
+      }
+      var res = resolveDestino(p, elDest.value);
+      if(res.error){ showMessageSheet("Falta un dato", res.error); return; }
+      var fecha = cfg.fecha || todayStr();
+      var efecto = applyDeposit(p, res.h, monto, fecha, res.precio);
+      if(!efecto){
+        showMessageSheet("No se pudo guardar", "Revisa el precio de la acción y la tasa de cambio.");
+        return;
+      }
+      var sid = uid();
+      p.savings.push({
+        id: sid, date: fecha, amount: monto,
+        note: cfg.nota || "",
+        fromBudget: cfg.fromBudget !== false,
+        categoryId: elCat.value || "",
+        holdingId: res.h.id,
+        movementId: efecto.movementId || "",
+        shares: efecto.shares || 0,
+        nativo: efecto.nativo || 0
+      });
+      if(cfg.weekKey) p.weekClose[cfg.weekKey] = { r:"ahorro", amount: monto, savingId: sid, at: todayStr() };
+      saveDB();
+      closeSheet();
+      currentTab = "ahorros";
+      renderApp();
+      showToast("Guardaste " + fmt(p, monto) + " en " + res.h.name + ".");
+    });
+  }
+
+  // Abre la hoja con lo que sobró de una semana ya cerrada
   function openWeekSaveSheet(clave){
     var p = activeProfile();
     var w = pendingWeekClose(p);
-    if(!w || w.semana.desde !== clave) return;
-    openSheet(
-      '<div class="sheet-head"><h3>Guardar de la semana ' + w.semana.idx + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
-      '<p class="sub">Te sobraron <b>' + fmt(p, w.sobra) + '</b> del ' + cycleLabel(w.semana) + '.</p>' +
-      '<form id="weekForm" class="stack" style="margin-top:12px;">' +
-        '<label class="field">¿Cuánto mandas al ahorro?<input type="text" id="wkAmount" inputmode="decimal" value="' + Math.round(w.sobra) + '" required></label>' +
-        '<button class="btn block" type="submit">Guardar en ahorros</button>' +
-      '</form>' +
-      '<p class="note-line">Lo que guardes sale del presupuesto de esa semana, así que tu ritmo diario se recalcula con lo que quede.</p>'
-    );
-    document.getElementById("closeSheet").addEventListener("click", closeSheet);
-    document.getElementById("weekForm").addEventListener("submit", function(e){
-      e.preventDefault();
-      var monto = parseNum(document.getElementById("wkAmount").value);
-      if(!(monto > 0)){
-        showMessageSheet("Falta el monto", "Escribe cuánto quieres mandar al ahorro.");
-        return;
-      }
-      closeSheet();
-      saveWeekLeftover(clave, monto);
+    if(!w || w.semana.desde !== clave){ renderApp(); return; }
+    openSaveToSheet({
+      titulo: "Guardar lo de la semana " + w.semana.idx,
+      sub: 'Te sobraron <b>' + fmt(p, w.sobra) + '</b> del ' + cycleLabel(w.semana) + '.',
+      monto: w.sobra,
+      fecha: w.semana.hasta,
+      nota: "Sobrante semana " + cycleLabel(w.semana),
+      weekKey: clave,
+      fromBudget: true
     });
   }
 
+  // Devuelve al presupuesto plata que habías mandado al ahorro
+  function returnSaving(id){
+    var p = activeProfile();
+    var entry = null;
+    for(var i=0;i<p.savings.length;i++){ if(p.savings[i].id === id) entry = p.savings[i]; }
+    if(!entry || entry.returned) return;
+    var h = findHolding(p, entry.holdingId);
+    var cat = entry.categoryId ? getCategory(p, entry.categoryId) : null;
+    askConfirm({
+      title: "Devolver al presupuesto",
+      body: "Sacas " + fmt(p, entry.amount) + (h ? " de " + h.name : "") +
+            " y vuelve a contar como plata disponible para gastar" + (cat ? " en " + cat.name : "") + ".",
+      confirmLabel: "Devolver " + fmt(p, entry.amount),
+      onConfirm: function(){
+        undoDeposit(p, h, entry);
+        entry.returned = true;
+        entry.returnedDate = todayStr();
+        saveDB();
+        renderApp();
+        showToast(fmt(p, entry.amount) + " volvió a tu presupuesto.");
+      }
+    });
+  }
   // Cuánto sobró (o faltó) en cada mes cerrado
   function savingsByMonth(p){
     if((Number(p.budget) || 0) <= 0) return "";
@@ -1940,7 +2300,7 @@
 
   // ---------- gráfica mensual: gastos vs ahorro ----------
   function monthSaved(p, ym){
-    var s = p.savings.reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? Number(x.amount)||0 : 0); }, 0);
+    var s = activeSavings(p).reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? Number(x.amount)||0 : 0); }, 0);
     var i = p.interest.reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? Number(x.amount)||0 : 0); }, 0);
     return s + i;
   }
@@ -2064,21 +2424,34 @@
       '</div>';
     }
 
+    var savedByCat = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta);
     var catCards = p.categories.map(function(c, idx){
       var sp = spentByCat[c.id] || 0;
+      var gu = savedByCat[c.id] || 0;               // lo que apartaste para ahorro
+      var usado = sp + gu;                          // ya no está disponible
       var alloc = Number(c.amount) || 0;
-      var queda = alloc - sp;                       // lo que te falta por gastar
-      var pct = alloc > 0 ? clamp((sp/alloc)*100, 0, 100) : (sp>0?100:0);
-      var state = alloc > 0 && sp > alloc ? "danger" : pct >= 85 ? "warn" : "good";
-      var pastilla = queda >= 0 ? fmt(p, queda) : "−" + fmt(p, -queda);
+      var queda = alloc - usado;                    // lo que te falta por gastar
+      var pct = alloc > 0 ? clamp((usado/alloc)*100, 0, 100) : (usado>0?100:0);
+      var state = alloc > 0 && usado > alloc ? "danger" : pct >= 85 ? "warn" : "good";
+      // Lo que queda va grande y con su nombre: es el número que se consulta
+      // antes de gastar. Lo asignado y lo gastado quedan de apoyo.
+      var titular = alloc <= 0
+        ? '<div class="cat-queda sinmonto">Sin monto asignado</div>'
+        : (queda >= 0
+            ? '<div class="cat-queda"><span class="cat-queda-k">Te quedan</span><span class="cat-queda-v tnum ' + state + '">' + fmt(p, queda) + '</span></div>'
+            : '<div class="cat-queda"><span class="cat-queda-k">Te pasaste por</span><span class="cat-queda-v tnum danger">' + fmt(p, -queda) + '</span></div>');
       return '<div class="catcard">' +
-        '<div class="row"><div class="row" style="gap:8px;"><span class="catdot" style="background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span><span style="font-weight:600;">' + esc(c.name) + '</span></div>' +
-        '<span class="pill ' + state + '">' + pastilla + '</span></div>' +
-        '<div class="progress"><span style="width:' + pct + '%; background:' + (state==="danger"?"var(--danger)":state==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
-        '<div class="amounts row" style="margin-top:6px;">' +
-          '<span>' + (queda >= 0 ? 'te queda de ' + fmt(p,alloc) : 'te pasaste de ' + fmt(p,alloc)) + '</span>' +
-          '<span>llevas ' + fmt(p,sp) + '</span>' +
+        '<div class="row">' +
+          '<div class="row" style="gap:8px; min-width:0;"><span class="catdot" style="background:' + catColor(c.colorIdx!=null?c.colorIdx:idx) + '"></span><span class="cat-nombre">' + esc(c.name) + '</span></div>' +
+          '<span class="cat-llevas tnum">llevas ' + fmt(p, sp) + '</span>' +
         '</div>' +
+        titular +
+        '<div class="progress"><span style="width:' + pct + '%; background:' + (state==="danger"?"var(--danger)":state==="warn"?"var(--warn)":"var(--accent)") + '"></span></div>' +
+        (alloc > 0
+          ? '<div class="cat-pie">de ' + fmt(p, alloc) + ' asignados' +
+              (gu > 0 ? ' · <span class="cat-guardado">' + fmt(p, gu) + ' al ahorro</span>' : '') +
+            '</div>'
+          : '<div class="cat-pie">Ponle un monto en la pestaña Plan para ver cuánto te queda.</div>') +
       '</div>';
     }).join("");
 
@@ -2110,6 +2483,14 @@
       '</div>' +
       (paceCard(p) ? '<div><div class="section-title">Tu ritmo</div>' + paceCard(p) + '</div>' : '') +
       '<div>' +
+        '<div class="section-title">Cuánto te queda por categoría</div>' +
+        '<div class="card">' + catCards + '</div>' +
+        (orphanSpent > 0 ? '<p class="note-line">Gastos sin categoría (eliminada): ' + fmt(p, orphanSpent) + '</p>' : '') +
+      '</div>' +
+      '<div class="fab-row" style="margin-top:0;">' +
+        '<button class="btn block" data-action="add-expense">+ Registrar gasto</button>' +
+      '</div>' +
+      '<div>' +
         '<div class="section-title">Gastos y ahorro por mes</div>' +
         '<div class="card">' + buildMonthlyChart(p) + '</div>' +
       '</div>' +
@@ -2120,14 +2501,6 @@
           (hayMesesEstimados(p) ? ' Los marcados como estimado son de antes de que la app llevara ese registro, así que usan el presupuesto actual.' : '') +
         '</p>' +
       '</div>' : '') +
-      '<div>' +
-        '<div class="section-title">Por categoría</div>' +
-        '<div class="card">' + catCards + '</div>' +
-        (orphanSpent > 0 ? '<p class="note-line">Gastos sin categoría (eliminada): ' + fmt(p, orphanSpent) + '</p>' : '') +
-      '</div>' +
-      '<div class="fab-row">' +
-        '<button class="btn block" data-action="add-expense">+ Registrar gasto</button>' +
-      '</div>' +
       backupSection() +
     '</div>';
   }
@@ -2596,12 +2969,47 @@
       '<form id="expForm" class="stack">' +
         '<label class="field">Fecha<input type="date" id="expDate" value="' + todayStr() + '" required></label>' +
         '<label class="field">Categoría<select id="expCat" required>' + categoryOptions(p) + '</select></label>' +
+        '<div class="queda-hint" id="quedaHint"></div>' +
         '<label class="field">Monto<input type="text" id="expAmount" inputmode="decimal" placeholder="Ej. 45.000" required></label>' +
         '<label class="field">Nota (opcional)<input type="text" id="expNote" maxlength="60" placeholder="Ej. Mercado de la semana"></label>' +
         '<button class="btn block" type="submit">Guardar gasto</button>' +
       '</form>'
     );
     document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    // Cuánto queda en la categoría elegida, y cómo queda si guardas este gasto
+    (function(){
+      var sel = document.getElementById("expCat");
+      var monto = document.getElementById("expAmount");
+      var hint = document.getElementById("quedaHint");
+      function pintar(){
+        var ciclo = currentCycle(p);
+        var porCat = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta);
+        var guardado = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta);
+        var c = getCategory(p, sel.value);
+        if(!c){ hint.innerHTML = ""; return; }
+        var alloc = Number(c.amount) || 0;
+        if(alloc <= 0){
+          hint.innerHTML = '<span class="qh-k">' + esc(c.name) + ' no tiene monto asignado.</span>';
+          return;
+        }
+        var queda = alloc - (porCat[c.id] || 0) - (guardado[c.id] || 0);
+        var gasto = parseNum(monto.value);
+        var despues = queda - gasto;
+        hint.innerHTML =
+          '<span class="qh-k">' + (queda >= 0 ? 'Te quedan en ' : 'Ya te pasaste en ') + esc(c.name) + (queda < 0 ? ' por' : '') + '</span>' +
+          '<span class="qh-v tnum ' + (queda < 0 ? "danger" : "") + '">' + fmt(p, Math.abs(queda)) + '</span>' +
+          (gasto > 0
+            ? '<span class="qh-after' + (despues < 0 ? " danger" : "") + '">' +
+                (despues >= 0
+                  ? 'Con este gasto te quedarían ' + fmt(p, despues)
+                  : 'Con este gasto te pasarías por ' + fmt(p, -despues)) +
+              '</span>'
+            : '');
+      }
+      sel.addEventListener("change", pintar);
+      monto.addEventListener("input", pintar);
+      pintar();
+    })();
     document.getElementById("expForm").addEventListener("submit", function(e){
       e.preventDefault();
       var amount = parseNum(document.getElementById("expAmount").value);
@@ -2702,22 +3110,40 @@
   }
 
   function viewAhorros(p){
-    var totalSavings = p.savings.reduce(function(s,x){ return s+Number(x.amount); }, 0);
+    var totalSavings = activeSavings(p).reduce(function(s,x){ return s+Number(x.amount); }, 0);
     var totalInterest = p.interest.reduce(function(s,x){ return s+Number(x.amount); }, 0);
     var patrimonio = totalSavings + totalInterest;
 
-    var combined = p.savings.map(function(x){ return {date:x.date, amount:Number(x.amount), type:"ahorro", note:x.note, id:x.id}; })
+    var combined = p.savings.map(function(x){
+        return {date:x.date, amount:Number(x.amount), type:"ahorro", note:x.note, id:x.id,
+                holdingId:x.holdingId, categoryId:x.categoryId, fromBudget:!!x.fromBudget,
+                returned:!!x.returned, returnedDate:x.returnedDate, shares:x.shares};
+      })
       .concat(p.interest.map(function(x){ return {date:x.date, amount:Number(x.amount), type:"interes", note:x.note, id:x.id}; }));
-    var sortedAsc = combined.slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
+    var sortedAsc = combined.filter(function(e){ return !e.returned; })
+      .slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
     var cum = 0;
     var points = sortedAsc.map(function(e){ cum += e.amount; return {cum: cum}; });
     if(points.length) points.unshift({cum:0});
 
     var listDesc = combined.slice().sort(function(a,b){ return b.date.localeCompare(a.date); });
     var rows = listDesc.map(function(e){
-      return '<div class="exprow">' +
-        '<span class="pill ' + (e.type==="ahorro"?"good":"warn") + '" style="min-width:56px; text-align:center;">' + (e.type==="ahorro"?"Ahorro":"Interés") + '</span>' +
-        '<div class="meta"><div class="cname">' + dateShort(e.date) + '</div>' + (e.note ? '<div class="note">' + esc(e.note) + '</div>' : '') + '</div>' +
+      var destino = e.holdingId ? findHolding(p, e.holdingId) : null;
+      var cat = e.categoryId ? getCategory(p, e.categoryId) : null;
+      var pista = [];
+      if(destino) pista.push("→ " + esc(destino.name) + (e.shares > 0 ? " · " + Number(e.shares).toLocaleString("es-CO", {maximumFractionDigits:4}) + " acc." : ""));
+      if(cat) pista.push("de " + esc(cat.name));
+      var puedeDevolver = e.type === "ahorro" && e.fromBudget && !e.returned;
+      return '<div class="exprow' + (e.returned ? " devuelto" : "") + '">' +
+        '<span class="pill ' + (e.returned ? "" : e.type==="ahorro"?"good":"warn") + '" style="min-width:56px; text-align:center;">' +
+          (e.returned ? "Devuelto" : e.type==="ahorro" ? "Ahorro" : "Interés") + '</span>' +
+        '<div class="meta">' +
+          '<div class="cname">' + dateShort(e.date) + '</div>' +
+          (e.note ? '<div class="note">' + esc(e.note) + '</div>' : '') +
+          (pista.length ? '<div class="sav-dest">' + pista.join(" · ") + '</div>' : '') +
+          (e.returned ? '<div class="sav-dest">Volvió al presupuesto el ' + dateShort(e.returnedDate || e.date) + '</div>' : '') +
+          (puedeDevolver ? '<button class="linkbtn" data-returnsav="' + e.id + '">Devolver al presupuesto</button>' : '') +
+        '</div>' +
         '<div class="amt tnum">' + fmt(p, e.amount) + '</div>' +
         '<button class="icon-btn" data-del' + (e.type==="ahorro"?"sav":"int") + '="' + e.id + '" title="Eliminar">✕</button>' +
       '</div>';
@@ -2834,7 +3260,15 @@
               : '') +
           '</div>';
       } else {
-        detalle = '<div class="hold-foot">Saldo que tienes guardado en este lugar.</div>';
+        var movsC = movesSum(h);
+        detalle =
+          '<div class="hold-foot">Saldo que tienes guardado en este lugar.' +
+            (movsC !== 0 ? ' Base ' + fmt(p, h.amount) + ' <span class="mov-tag ' + (movsC > 0 ? "pos" : "neg") + '">' + (movsC > 0 ? "+" : "") + fmt(p, movsC) + '</span>' : '') +
+          '</div>' +
+          '<div class="hold-acciones">' +
+            '<button class="linkbtn" data-movehold="' + h.id + '" data-signo="1">+ Abonar</button>' +
+            '<button class="linkbtn" data-movehold="' + h.id + '" data-signo="-1">− Retirar</button>' +
+          '</div>';
       }
 
       return '<div class="hold">' +
@@ -3458,7 +3892,7 @@
         var a = action.dataset.action;
         if(a === "add-expense") openAddExpense();
         else if(a === "add-category") addCategory(p);
-        else if(a === "add-saving") openAddMoney("saving");
+        else if(a === "add-saving") openSaveToSheet({ titulo:"Mandar plata al ahorro" });
         else if(a === "add-interest") openAddMoney("interest");
         else if(a === "prev-month"){ uiMonth = ymAdd(uiMonth, -1); renderView(); }
         else if(a === "next-month"){ uiMonth = ymAdd(uiMonth, 1); renderView(); }
@@ -3580,13 +4014,13 @@
 
       var weeksave = e.target.closest("[data-weeksave]");
       if(weeksave){
-        saveWeekLeftover(weeksave.dataset.weeksave, null);
+        openWeekSaveSheet(weeksave.dataset.weeksave);
         return;
       }
 
-      var weekother = e.target.closest("[data-weekother]");
-      if(weekother){
-        openWeekSaveSheet(weekother.dataset.weekother);
+      var returnsav = e.target.closest("[data-returnsav]");
+      if(returnsav){
+        returnSaving(returnsav.dataset.returnsav);
         return;
       }
 
@@ -3634,6 +4068,10 @@
       }
       var delsav = e.target.closest("[data-delsav]");
       if(delsav){
+        // Si ese aporte había metido plata en un tipo de ahorro, también se saca
+        var quitar = null;
+        p.savings.forEach(function(x){ if(x.id === delsav.dataset.delsav) quitar = x; });
+        if(quitar && !quitar.returned) undoDeposit(p, findHolding(p, quitar.holdingId), quitar);
         p.savings = p.savings.filter(function(x){ return x.id !== delsav.dataset.delsav; });
         saveDB(); renderView(); return;
       }
