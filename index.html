@@ -1024,9 +1024,31 @@
     return v;
   }
 
-  // Un aporte devuelto al presupuesto deja de contar como ahorro
+  // Un aporte se puede devolver al presupuesto entero o por partes.
+  // Lo devuelto deja de contar como ahorro; lo que queda sigue vivo.
+  function savingReturnedAmount(x){
+    if(x.returnedAmount != null) return Number(x.returnedAmount) || 0;
+    return x.returned ? (Number(x.amount) || 0) : 0;   // aportes de antes: todo o nada
+  }
+  function savingLeft(x){
+    return Math.max(0, (Number(x.amount) || 0) - savingReturnedAmount(x));
+  }
+  function savingFullyReturned(x){ return savingLeft(x) < 0.5; }
+  // Las partes por categoría se encogen a la par de lo que devolviste
+  function savingSplitLeft(x){
+    var total = Number(x.amount) || 0;
+    var queda = savingLeft(x);
+    if(total <= 0 || queda <= 0) return [];
+    var factor = queda / total;
+    if(Array.isArray(x.split) && x.split.length){
+      return x.split.map(function(s){
+        return { categoryId: s.categoryId, amount: (Number(s.amount) || 0) * factor };
+      });
+    }
+    return x.categoryId ? [{ categoryId: x.categoryId, amount: queda }] : [];
+  }
   function activeSavings(p){
-    return (p.savings || []).filter(function(s){ return !s.returned; });
+    return (p.savings || []).filter(function(s){ return !savingFullyReturned(s); });
   }
   function findHolding(p, id){
     for(var i=0;i<p.holdings.length;i++){ if(p.holdings[i].id === id) return p.holdings[i]; }
@@ -1725,7 +1747,7 @@
   function budgetSavingsInRange(p, desde, hasta){
     return activeSavings(p).reduce(function(s, x){
       var d = String(x.date);
-      return s + ((x.fromBudget && d >= desde && d <= hasta) ? (Number(x.amount)||0) : 0);
+      return s + ((x.fromBudget && d >= desde && d <= hasta) ? savingLeft(x) : 0);
     }, 0);
   }
   // Lo guardado, repartido por la categoría de la que lo sacaste
@@ -1735,14 +1757,11 @@
       if(!x.fromBudget) return;
       var d = String(x.date);
       if(d < desde || d > hasta) return;
-      // Un aporte puede salir de una sola categoría o venir repartido entre varias
-      if(Array.isArray(x.split) && x.split.length){
-        x.split.forEach(function(s){
-          if(s.categoryId) map[s.categoryId] = (map[s.categoryId] || 0) + (Number(s.amount)||0);
-        });
-        return;
-      }
-      if(x.categoryId) map[x.categoryId] = (map[x.categoryId] || 0) + (Number(x.amount)||0);
+      // Un aporte puede salir de una sola categoría o venir repartido entre
+      // varias; en ambos casos se cuenta solo lo que no has devuelto.
+      savingSplitLeft(x).forEach(function(s){
+        if(s.categoryId) map[s.categoryId] = (map[s.categoryId] || 0) + (Number(s.amount)||0);
+      });
     });
     return map;
   }
@@ -2139,17 +2158,30 @@
   }
 
   // Saca del tipo de ahorro lo que estás devolviendo al presupuesto
-  function undoDeposit(p, h, entry){
-    if(!h) return;
+  // Saca del tipo de ahorro solo la parte que estás devolviendo. Lo que sigue
+  // invertido queda anotado en el aporte, así devolver por partes es exacto
+  // sin importar en cuántas veces lo hagas.
+  function withdrawDeposit(p, h, entry, monto){
+    var quedaba = savingLeft(entry);
+    if(!h || !(monto > 0) || quedaba <= 0) return;
+    var frac = Math.min(1, monto / quedaba);
     if(h.kind === "accion"){
-      var nativo = Number(entry.nativo) || 0;
+      var acciones = (Number(entry.shares) || 0) * frac;
+      var nativo = (Number(entry.nativo) || 0) * frac;
       var costo = (Number(h.shares)||0) * (Number(h.buyPrice)||0) - nativo;
-      h.shares = Math.max(0, (Number(h.shares)||0) - (Number(entry.shares) || 0));
+      h.shares = Math.max(0, (Number(h.shares)||0) - acciones);
       h.buyPrice = h.shares > 0 ? Math.max(0, costo) / h.shares : 0;
+      entry.shares = Math.max(0, (Number(entry.shares) || 0) - acciones);
+      entry.nativo = Math.max(0, (Number(entry.nativo) || 0) - nativo);
       return;
     }
     if(entry.movementId && Array.isArray(h.movements)){
-      h.movements = h.movements.filter(function(m){ return m.id !== entry.movementId; });
+      for(var i = 0; i < h.movements.length; i++){
+        if(h.movements[i].id !== entry.movementId) continue;
+        h.movements[i].amount = (Number(h.movements[i].amount) || 0) - monto;
+        if(Math.abs(h.movements[i].amount) < 0.5) h.movements.splice(i, 1);
+        return;
+      }
     }
   }
 
@@ -2465,37 +2497,109 @@
     });
   }
 
-  // Devuelve al presupuesto plata que habías mandado al ahorro
-  function returnSaving(id){
+  // Devuelve al presupuesto plata que habías mandado al ahorro. Puede ser todo
+  // o solo una parte: lo que devuelves vuelve a las mismas categorías de donde
+  // salió, en la misma proporción.
+  function openReturnSheet(id){
     var p = activeProfile();
     var entry = null;
-    for(var i=0;i<p.savings.length;i++){ if(p.savings[i].id === id) entry = p.savings[i]; }
-    if(!entry || entry.returned) return;
+    for(var i = 0; i < p.savings.length; i++){ if(p.savings[i].id === id) entry = p.savings[i]; }
+    if(!entry || savingFullyReturned(entry)) return;
     var h = findHolding(p, entry.holdingId);
-    var cat = entry.categoryId ? getCategory(p, entry.categoryId) : null;
-    var vuelveA = "";
-    if(cat){
-      vuelveA = " en " + cat.name;
-    } else if(Array.isArray(entry.split) && entry.split.length){
-      var trozos = entry.split.map(function(s){
-        var cc = getCategory(p, s.categoryId);
-        return cc ? cc.name + " (" + fmt(p, s.amount) + ")" : null;
-      }).filter(Boolean);
-      if(trozos.length) vuelveA = ", repartido de vuelta en " + trozos.join(", ");
-    }
-    askConfirm({
-      title: "Devolver al presupuesto",
-      body: "Sacas " + fmt(p, entry.amount) + (h ? " de " + h.name : "") +
-            " y vuelve a contar como plata disponible para gastar" + vuelveA + ".",
-      confirmLabel: "Devolver " + fmt(p, entry.amount),
-      onConfirm: function(){
-        undoDeposit(p, h, entry);
-        entry.returned = true;
-        entry.returnedDate = todayStr();
-        saveDB();
-        renderApp();
-        showToast(fmt(p, entry.amount) + " volvió a tu presupuesto.");
+    var queda = savingLeft(entry);
+    var yaDevuelto = savingReturnedAmount(entry);
+
+    openSheet(
+      '<div class="sheet-head"><h3>Devolver al presupuesto</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<p class="sub">' +
+        (entry.note ? esc(entry.note) + ': ' : '') +
+        'quedan <b>' + fmt(p, queda) + '</b>' + (h ? ' en ' + esc(h.name) : '') + '.' +
+        (yaDevuelto > 0 ? ' Ya habías devuelto ' + fmt(p, yaDevuelto) + ' de ' + fmt(p, entry.amount) + '.' : '') +
+      '</p>' +
+      '<form id="retForm" class="stack" style="margin-top:12px;">' +
+        '<label class="field">¿Cuánto necesitas devolver?<input type="text" id="rtAmount" inputmode="decimal" value="' + Math.round(queda) + '" required></label>' +
+        '<div class="fab-row" style="margin-top:0;">' +
+          '<button class="btn ghost block" type="button" data-rtquick="todo">Todo</button>' +
+          '<button class="btn ghost block" type="button" data-rtquick="mitad">La mitad</button>' +
+        '</div>' +
+        '<div id="rtPreview"></div>' +
+        '<button class="btn block" type="submit" id="rtSubmit">Devolver</button>' +
+      '</form>'
+    );
+    document.getElementById("closeSheet").addEventListener("click", closeSheet);
+    var elMonto = document.getElementById("rtAmount");
+
+    function pintar(){
+      var caja = document.getElementById("rtPreview");
+      var monto = Math.round(parseNum(elMonto.value));
+      var boton = document.getElementById("rtSubmit");
+      if(!(monto > 0)){
+        caja.innerHTML = '<div class="queda-hint"><span class="qh-k">Escribe cuánto vas a devolver.</span></div>';
+        boton.textContent = "Devolver";
+        return;
       }
+      if(monto > queda){
+        caja.innerHTML = '<div class="queda-hint"><span class="qh-k">Solo quedan</span>' +
+          '<span class="qh-v tnum">' + fmt(p, queda) + '</span>' +
+          '<span class="qh-after danger">No puedes devolver más de lo que sigue guardado.</span></div>';
+        boton.textContent = "Devolver";
+        return;
+      }
+      // A dónde vuelve, en la misma proporción en que salió
+      var partes = savingSplitLeft(entry);
+      var factor = queda > 0 ? monto / queda : 0;
+      var filas = partes.map(function(s){
+        var c = getCategory(p, s.categoryId);
+        if(!c) return null;
+        return '<div class="reparto-fila">' +
+          '<span class="reparto-nom">' + esc(c.name) + '</span>' +
+          '<span class="reparto-val tnum">+' + fmt(p, s.amount * factor) + '</span>' +
+        '</div>';
+      }).filter(Boolean).join("");
+      var sobra = queda - monto;
+      caja.innerHTML = '<div class="reparto">' +
+        '<div class="reparto-k">Vuelve a tu presupuesto:</div>' +
+        (filas || '<div class="reparto-fila"><span class="reparto-nom">Al total del periodo</span>' +
+                  '<span class="reparto-val tnum">+' + fmt(p, monto) + '</span></div>') +
+        '<div class="reparto-total"><span>' +
+          (sobra > 0.5 ? 'Siguen guardados ' + fmt(p, sobra) : 'No queda nada guardado de este aporte') +
+        '</span></div>' +
+      '</div>';
+      boton.textContent = "Devolver " + fmt(p, monto);
+    }
+
+    document.getElementById("retForm").addEventListener("click", function(ev){
+      var b = ev.target.closest ? ev.target.closest("[data-rtquick]") : null;
+      if(!b) return;
+      ev.preventDefault();
+      elMonto.value = b.dataset.rtquick === "todo" ? Math.round(queda) : Math.round(queda / 2);
+      pintar();
+    });
+    elMonto.addEventListener("input", pintar);
+    pintar();
+
+    document.getElementById("retForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var monto = Math.round(parseNum(elMonto.value));
+      if(!(monto > 0)){
+        showMessageSheet("Falta el monto", "Escribe cuánto quieres devolver al presupuesto.");
+        return;
+      }
+      if(monto > queda){
+        showMessageSheet("Es más de lo que queda",
+          "De este aporte solo quedan " + fmt(p, queda) + " guardados. Devuelve esa cantidad o menos.");
+        return;
+      }
+      withdrawDeposit(p, h, entry, monto);
+      entry.returnedAmount = savingReturnedAmount(entry) + monto;
+      entry.returnedDate = todayStr();
+      if(!Array.isArray(entry.returns)) entry.returns = [];
+      entry.returns.push({ date: todayStr(), amount: monto });
+      entry.returned = savingFullyReturned(entry);
+      saveDB();
+      closeSheet();
+      renderApp();
+      showToast(fmt(p, monto) + " volvió a tu presupuesto.");
     });
   }
   // Cuánto sobró (o faltó) en cada mes cerrado
@@ -2530,7 +2634,7 @@
 
   // ---------- gráfica mensual: gastos vs ahorro ----------
   function monthSaved(p, ym){
-    var s = activeSavings(p).reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? Number(x.amount)||0 : 0); }, 0);
+    var s = activeSavings(p).reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? savingLeft(x) : 0); }, 0);
     var i = p.interest.reduce(function(a,x){ return a + (String(x.date).slice(0,7) === ym ? Number(x.amount)||0 : 0); }, 0);
     return s + i;
   }
@@ -3340,20 +3444,26 @@
   }
 
   function viewAhorros(p){
-    var totalSavings = activeSavings(p).reduce(function(s,x){ return s+Number(x.amount); }, 0);
+    var totalSavings = activeSavings(p).reduce(function(s,x){ return s + savingLeft(x); }, 0);
     var totalInterest = p.interest.reduce(function(s,x){ return s+Number(x.amount); }, 0);
     var patrimonio = totalSavings + totalInterest;
 
     var combined = p.savings.map(function(x){
         return {date:x.date, amount:Number(x.amount), type:"ahorro", note:x.note, id:x.id,
                 holdingId:x.holdingId, categoryId:x.categoryId, split:x.split, fromBudget:!!x.fromBudget,
-                returned:!!x.returned, returnedDate:x.returnedDate, shares:x.shares};
+                left: savingLeft(x), returnedAmount: savingReturnedAmount(x),
+                fullyReturned: savingFullyReturned(x),
+                returnedDate:x.returnedDate, shares:x.shares};
       })
       .concat(p.interest.map(function(x){ return {date:x.date, amount:Number(x.amount), type:"interes", note:x.note, id:x.id}; }));
-    var sortedAsc = combined.filter(function(e){ return !e.returned; })
+    // La curva acumula lo que sigue guardado, no lo que devolviste
+    var sortedAsc = combined.filter(function(e){ return !e.fullyReturned; })
       .slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
     var cum = 0;
-    var points = sortedAsc.map(function(e){ cum += e.amount; return {cum: cum}; });
+    var points = sortedAsc.map(function(e){
+      cum += (e.left != null ? e.left : e.amount);
+      return {cum: cum};
+    });
     if(points.length) points.unshift({cum:0});
 
     var listDesc = combined.slice().sort(function(a,b){ return b.date.localeCompare(a.date); });
@@ -3373,19 +3483,27 @@
           ? "de " + esc(nombres.join(" y "))
           : "repartido entre " + nombres.length + " categorías");
       }
-      var puedeDevolver = e.type === "ahorro" && e.fromBudget && !e.returned;
-      return '<div class="exprow' + (e.returned ? " devuelto" : "") + '">' +
-        '<span class="pill ' + (e.returned ? "" : e.type==="ahorro"?"good":"warn") + '" style="min-width:56px; text-align:center;">' +
-          (e.returned ? "Devuelto" : e.type==="ahorro" ? "Ahorro" : "Interés") + '</span>' +
+      var esAhorro = e.type === "ahorro";
+      var devueltoTodo = esAhorro && e.fullyReturned;
+      var devueltoAlgo = esAhorro && e.returnedAmount > 0.5;
+      var puedeDevolver = esAhorro && e.fromBudget && !devueltoTodo;
+      var etiqueta = devueltoTodo ? "Devuelto" : devueltoAlgo ? "Parcial" : esAhorro ? "Ahorro" : "Interés";
+      var clasePill = devueltoTodo ? "" : devueltoAlgo ? "warn" : esAhorro ? "good" : "warn";
+      return '<div class="exprow' + (devueltoTodo ? " devuelto" : "") + '">' +
+        '<span class="pill ' + clasePill + '" style="min-width:56px; text-align:center;">' + etiqueta + '</span>' +
         '<div class="meta">' +
           '<div class="cname">' + dateShort(e.date) + '</div>' +
           (e.note ? '<div class="note">' + esc(e.note) + '</div>' : '') +
           (pista.length ? '<div class="sav-dest">' + pista.join(" · ") + '</div>' : '') +
-          (e.returned ? '<div class="sav-dest">Volvió al presupuesto el ' + dateShort(e.returnedDate || e.date) + '</div>' : '') +
+          (devueltoTodo
+            ? '<div class="sav-dest">Volvió al presupuesto el ' + dateShort(e.returnedDate || e.date) + '</div>'
+            : devueltoAlgo
+              ? '<div class="sav-dest">Devolviste ' + fmt(p, e.returnedAmount) + ' de ' + fmt(p, e.amount) + '</div>'
+              : '') +
           (puedeDevolver ? '<button class="linkbtn" data-returnsav="' + e.id + '">Devolver al presupuesto</button>' : '') +
         '</div>' +
-        '<div class="amt tnum">' + fmt(p, e.amount) + '</div>' +
-        '<button class="icon-btn" data-del' + (e.type==="ahorro"?"sav":"int") + '="' + e.id + '" title="Eliminar">✕</button>' +
+        '<div class="amt tnum">' + fmt(p, (devueltoTodo || e.left == null) ? e.amount : e.left) + '</div>' +
+        '<button class="icon-btn" data-del' + (esAhorro ? "sav" : "int") + '="' + e.id + '" title="Eliminar">✕</button>' +
       '</div>';
     }).join("");
 
@@ -4260,7 +4378,7 @@
 
       var returnsav = e.target.closest("[data-returnsav]");
       if(returnsav){
-        returnSaving(returnsav.dataset.returnsav);
+        openReturnSheet(returnsav.dataset.returnsav);
         return;
       }
 
@@ -4311,7 +4429,7 @@
         // Si ese aporte había metido plata en un tipo de ahorro, también se saca
         var quitar = null;
         p.savings.forEach(function(x){ if(x.id === delsav.dataset.delsav) quitar = x; });
-        if(quitar && !quitar.returned) undoDeposit(p, findHolding(p, quitar.holdingId), quitar);
+        if(quitar) withdrawDeposit(p, findHolding(p, quitar.holdingId), quitar, savingLeft(quitar));
         p.savings = p.savings.filter(function(x){ return x.id !== delsav.dataset.delsav; });
         saveDB(); renderView(); return;
       }
