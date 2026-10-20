@@ -308,6 +308,8 @@
   .cat-queda.sinmonto{font-size:.85rem; color:var(--ink-faint); font-weight:600;}
   .cat-pie{margin-top:6px; font-size:.75rem; color:var(--ink-soft); font-family:var(--font-mono);}
   .cat-guardado{color:var(--good); font-weight:700;}
+  .cat-deuda{color:var(--good); font-weight:700;}
+  .cat-deuda.neg{color:var(--danger);}
   .sav-dest{font-size:.72rem; color:var(--ink-soft); margin-top:1px;}
 
   /* Reparto del ahorro entre categorías */
@@ -1771,13 +1773,12 @@
   // entre las que todavía tienen cupo.
   function splitEquitably(p, monto){
     var ciclo = currentCycle(p);
-    var gastos = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta);
-    var guardado = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta);
+    var uso = categoryUse(p, ciclo.desde, ciclo.hasta);
     var cats = p.categories.filter(function(c){ return Number(c.amount) > 0; });
     if(!cats.length || !(monto > 0)) return [];
     var libre = {}, dado = {};
     cats.forEach(function(c){
-      libre[c.id] = Math.max(0, (Number(c.amount)||0) - (gastos[c.id]||0) - (guardado[c.id]||0));
+      libre[c.id] = Math.max(0, catBase(c, uso) - catUsed(c, uso));
       dado[c.id] = 0;
     });
     var pendiente = monto;
@@ -1816,6 +1817,38 @@
     }
     return out.filter(function(x){ return x.amount > 0; });
   }
+  // Lo que entra o sale por deudas, repartido por categoría.
+  // Que te paguen suma a esa categoría; pagar lo que debes, le resta.
+  function debtsByCategoryInRange(p, desde, hasta){
+    var map = {};
+    (p.debts || []).forEach(function(d){
+      var signo = d.kind === "prestado" ? 1 : -1;
+      (d.payments || []).forEach(function(x){
+        if(!x.categoryId) return;
+        var f = String(x.date);
+        if(f < desde || f > hasta) return;
+        map[x.categoryId] = (map[x.categoryId] || 0) + signo * (Number(x.amount)||0);
+      });
+    });
+    return map;
+  }
+
+  // Los tres movimientos que tocan una categoría, calculados de una sola vez
+  function categoryUse(p, desde, hasta){
+    return {
+      gastado: spentByCategoryInRange(p, desde, hasta),
+      guardado: savedByCategoryInRange(p, desde, hasta),
+      deuda: debtsByCategoryInRange(p, desde, hasta)
+    };
+  }
+  // Lo asignado, más lo que te devolvieron de una deuda: ese es el techo real
+  function catBase(c, uso){
+    return (Number(c.amount) || 0) + ((uso.deuda[c.id] || 0));
+  }
+  function catUsed(c, uso){
+    return (uso.gastado[c.id] || 0) + (uso.guardado[c.id] || 0);
+  }
+
   function netOutflowInRange(p, desde, hasta){
     return spentInRange(p, desde, hasta)
          + budgetSavingsInRange(p, desde, hasta)             // lo guardaste
@@ -2189,12 +2222,11 @@
   function catRemaining(p, catId){
     var c = getCategory(p, catId);
     if(!c) return null;
+    if(!(Number(c.amount) > 0)) return null;
     var ciclo = currentCycle(p);
-    var alloc = Number(c.amount) || 0;
-    if(alloc <= 0) return null;
-    var g = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta)[catId] || 0;
-    var a = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta)[catId] || 0;
-    return { cat: c, alloc: alloc, queda: alloc - g - a };
+    var uso = categoryUse(p, ciclo.desde, ciclo.hasta);
+    var base = catBase(c, uso);
+    return { cat: c, alloc: Number(c.amount) || 0, base: base, queda: base - catUsed(c, uso) };
   }
 
   // La misma hoja sirve para el sobrante de la semana y para un aporte suelto
@@ -2758,15 +2790,17 @@
       '</div>';
     }
 
-    var savedByCat = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta);
+    var uso = categoryUse(p, ciclo.desde, ciclo.hasta);
     var catCards = p.categories.map(function(c, idx){
-      var sp = spentByCat[c.id] || 0;
-      var gu = savedByCat[c.id] || 0;               // lo que apartaste para ahorro
-      var usado = sp + gu;                          // ya no está disponible
+      var sp = uso.gastado[c.id] || 0;
+      var gu = uso.guardado[c.id] || 0;             // lo que apartaste para ahorro
+      var de = uso.deuda[c.id] || 0;                // lo que entró (o salió) por deudas
+      var usado = catUsed(c, uso);                  // ya no está disponible
       var alloc = Number(c.amount) || 0;
-      var queda = alloc - usado;                    // lo que te falta por gastar
-      var pct = alloc > 0 ? clamp((usado/alloc)*100, 0, 100) : (usado>0?100:0);
-      var state = alloc > 0 && usado > alloc ? "danger" : pct >= 85 ? "warn" : "good";
+      var base = catBase(c, uso);                   // el techo real de la categoría
+      var queda = base - usado;                     // lo que te falta por gastar
+      var pct = base > 0 ? clamp((usado/base)*100, 0, 100) : (usado>0?100:0);
+      var state = base > 0 && usado > base ? "danger" : pct >= 85 ? "warn" : "good";
       // Lo que queda va grande y con su nombre: es el número que se consulta
       // antes de gastar. Lo asignado y lo gastado quedan de apoyo.
       var titular = alloc <= 0
@@ -2784,6 +2818,8 @@
         (alloc > 0
           ? '<div class="cat-pie">de ' + fmt(p, alloc) + ' asignados' +
               (gu > 0 ? ' · <span class="cat-guardado">' + fmt(p, gu) + ' al ahorro</span>' : '') +
+              (de > 0 ? ' · <span class="cat-deuda">+' + fmt(p, de) + ' de una deuda</span>' : '') +
+              (de < 0 ? ' · <span class="cat-deuda neg">' + fmt(p, de) + ' a una deuda</span>' : '') +
             '</div>'
           : '<div class="cat-pie">Ponle un monto en la pestaña Plan para ver cuánto te queda.</div>') +
       '</div>';
@@ -3002,6 +3038,21 @@
               (d.affectsBudget ? ' · <span class="mueve">' + (kind === "prestado" ? "salió de tu presupuesto" : "entró a tu presupuesto") + '</span>' : '') +
             '</span>' +
           '</div>' +
+          (function(){
+            // A qué categorías fue a parar lo ya abonado
+            var porCat = {};
+            (d.payments || []).forEach(function(x){
+              if(!x.categoryId) return;
+              porCat[x.categoryId] = (porCat[x.categoryId] || 0) + (Number(x.amount)||0);
+            });
+            var lista = Object.keys(porCat).map(function(id){
+              var c = getCategory(p, id);
+              return c ? esc(c.name) + " " + fmt(p, porCat[id]) : null;
+            }).filter(Boolean);
+            return lista.length
+              ? '<div class="sav-dest">' + (kind === "prestado" ? "Entró a: " : "Salió de: ") + lista.join(" · ") + '</div>'
+              : '';
+          })() +
           (saldada ? '' : '<button class="linkbtn" data-paydebt="' + d.id + '">Registrar ' + (kind === "debo" ? "pago" : "abono recibido") + '</button>') +
         '</div>';
       }).join("");
@@ -3090,16 +3141,60 @@
     for(var i=0;i<p.debts.length;i++){ if(p.debts[i].id === id) d = p.debts[i]; }
     if(!d) return;
     var falta = debtLeft(d);
+    var recibe = d.kind === "prestado";   // te están pagando a ti
     openSheet(
-      '<div class="sheet-head"><h3>' + (d.kind === "debo" ? "Registrar pago" : "Registrar abono") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
+      '<div class="sheet-head"><h3>' + (recibe ? "Registrar abono" : "Registrar pago") + '</h3><button class="icon-btn" id="closeSheet">✕</button></div>' +
       '<p class="sub">' + esc(d.person) + ' · faltan <b>' + fmt(p, falta) + '</b></p>' +
       '<form id="payForm" class="stack" style="margin-top:12px;">' +
         '<label class="field">Monto<input type="text" id="payAmount" inputmode="decimal" value="' + falta + '" required></label>' +
         '<label class="field">Fecha<input type="date" id="payDate" value="' + todayStr() + '"></label>' +
+        (p.categories.length
+          ? '<label class="field">' + (recibe ? "¿A qué categoría va esa plata?" : "¿De qué categoría sale?") +
+              '<select id="payCat">' +
+                '<option value="">Sin categoría (solo al total del periodo)</option>' +
+                categoryOptions(p) +
+              '</select></label>' +
+            '<div class="queda-hint" id="payCatHint"></div>'
+          : '') +
         '<button class="btn block" type="submit">Guardar</button>' +
       '</form>'
     );
     document.getElementById("closeSheet").addEventListener("click", closeSheet);
+
+    // Cómo queda esa categoría si registras este pago
+    var elCat = document.getElementById("payCat");
+    var elMonto = document.getElementById("payAmount");
+    function pintarCat(){
+      var caja = document.getElementById("payCatHint");
+      if(!caja) return;
+      var r = catRemaining(p, elCat.value);
+      if(!r){
+        caja.innerHTML = elCat.value
+          ? '<span class="qh-k">Esa categoría no tiene monto asignado.</span>'
+          : '<span class="qh-k">' + (recibe
+              ? "La plata vuelve al total del periodo, sin sumarse a ninguna categoría."
+              : "El pago sale del total del periodo, sin restarle a ninguna categoría.") + '</span>';
+        return;
+      }
+      var monto = parseNum(elMonto.value);
+      var despues = r.queda + (recibe ? monto : -monto);
+      caja.innerHTML =
+        '<span class="qh-k">Te quedan en ' + esc(r.cat.name) + '</span>' +
+        '<span class="qh-v tnum">' + fmt(p, r.queda) + '</span>' +
+        (monto > 0
+          ? '<span class="qh-after' + (despues < 0 ? " danger" : "") + '">' +
+              (recibe
+                ? 'Con este abono pasarían a ' + fmt(p, despues)
+                : (despues >= 0 ? 'Con este pago quedarían ' + fmt(p, despues) : 'Te pasarías por ' + fmt(p, -despues))) +
+            '</span>'
+          : '');
+    }
+    if(elCat){
+      elCat.addEventListener("change", pintarCat);
+      elMonto.addEventListener("input", pintarCat);
+      pintarCat();
+    }
+
     document.getElementById("payForm").addEventListener("submit", function(e){
       e.preventDefault();
       var amount = parseNum(document.getElementById("payAmount").value);
@@ -3108,11 +3203,20 @@
         return;
       }
       d.payments = d.payments || [];
-      d.payments.push({ id: uid(), date: document.getElementById("payDate").value || todayStr(), amount: amount });
+      d.payments.push({
+        id: uid(),
+        date: document.getElementById("payDate").value || todayStr(),
+        amount: amount,
+        categoryId: elCat ? elCat.value : ""
+      });
       saveDB();
       closeSheet();
       renderView();
-      showToast(debtLeft(d) <= 0 ? "¡Deuda saldada!" : "Quedan " + fmt(p, debtLeft(d)) + ".");
+      var cat = elCat && elCat.value ? getCategory(p, elCat.value) : null;
+      showToast(
+        (debtLeft(d) <= 0 ? "¡Deuda saldada!" : "Quedan " + fmt(p, debtLeft(d)) + ".") +
+        (cat ? " " + fmt(p, amount) + (recibe ? " entró a " : " salió de ") + cat.name + "." : "")
+      );
     });
   }
 
@@ -3317,8 +3421,7 @@
       var hint = document.getElementById("quedaHint");
       function pintar(){
         var ciclo = currentCycle(p);
-        var porCat = spentByCategoryInRange(p, ciclo.desde, ciclo.hasta);
-        var guardado = savedByCategoryInRange(p, ciclo.desde, ciclo.hasta);
+        var uso = categoryUse(p, ciclo.desde, ciclo.hasta);
         var c = getCategory(p, sel.value);
         if(!c){ hint.innerHTML = ""; return; }
         var alloc = Number(c.amount) || 0;
@@ -3326,7 +3429,7 @@
           hint.innerHTML = '<span class="qh-k">' + esc(c.name) + ' no tiene monto asignado.</span>';
           return;
         }
-        var queda = alloc - (porCat[c.id] || 0) - (guardado[c.id] || 0);
+        var queda = catBase(c, uso) - catUsed(c, uso);
         var gasto = parseNum(monto.value);
         var despues = queda - gasto;
         hint.innerHTML =
